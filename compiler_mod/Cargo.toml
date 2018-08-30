@@ -1,0 +1,6 @@
+[package]
+name = "src"
+version = "0.1.0"
+authors = ["Dominik Dietler <ddietler@student.ethz.ch>"]
+
+[dependencies]
