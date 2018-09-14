@@ -10,6 +10,6 @@ fn main() {
   take(v);
 }
 
-fn take<T>(p: T) { .. }
+fn take<T>(p: T) { unimplemented!() }
 
 
