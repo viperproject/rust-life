@@ -10,21 +10,13 @@ extern crate rustc;
 extern crate rustc_driver;
 extern crate rustc_errors;
 extern crate rustc_codegen_utils;
-#[macro_use]
-extern crate serde_derive;
 extern crate syntax;
-//extern crate prusti_interface;
 extern crate syntax_pos;
 
 mod driver_utils;
-mod environment;
 mod dump_borrowck_info;
 mod facts;
 mod regions;
-mod procedure;
-mod loops;
-mod data;
-mod verifier;
 
 use rustc::session;
 use rustc_driver::{driver, Compilation, CompilerCalls, RustcDefaultCalls};
@@ -37,8 +29,9 @@ use syntax::ast;
 use syntax::feature_gate::AttributeType;
 //use prusti_interface::constants::PRUSTI_SPEC_ATTR;
 use driver_utils::run;
-use environment::EnvironmentImpl as Environment;
+use rustc::hir::def_id::DefId;
 
+pub type ProcedureDefId = DefId;
 
 struct PrustiCompilerCalls {
     default: Box<RustcDefaultCalls>,
@@ -141,10 +134,7 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
         control.after_analysis.callback = Box::new(move |state| {
             trace!("[after_analysis.callback] enter");
 
-            //let env = Environment::new(state);
-            //env.dump_borrowck_info();
-            verifier::verify(state);
-
+            dump_borrowck_info::dump_borrowck_info(state.tcx.unwrap());
 
             trace!("[after_analysis.callback] exit");
             old(state);

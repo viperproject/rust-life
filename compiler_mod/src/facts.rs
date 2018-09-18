@@ -180,10 +180,12 @@ impl<SourceType, IndexType> InternerTable<SourceType, IndexType>
     fn get_index(&self, element: &SourceType) -> IndexType {
         self.index_elements[element]
     }
+    /*
     fn get_element(&self, index: IndexType) -> &SourceType {
         let index: usize = index.into();
         &self.interned_elements[index]
     }
+    */
 }
 
 trait InternTo<FromType, ToType> {
@@ -202,9 +204,11 @@ impl Interner {
         self.points.get_index(point)
     }
 
+    /*
     pub fn get_point(&self, index: PointIndex) -> &Point {
         self.points.get_element(index)
     }
+    */
 
 }
 

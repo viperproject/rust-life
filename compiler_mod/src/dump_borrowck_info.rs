@@ -1,10 +1,3 @@
-#![feature(nll)]
-#![feature(rustc_private)]
-#![feature(box_syntax)]
-#![feature(box_patterns)]
-#![feature(try_from)]
-#![feature(crate_in_paths)]
-
 pub extern crate csv;
 extern crate datafrog;
 pub extern crate polonius;
@@ -19,16 +12,16 @@ pub extern crate syntax;
 pub extern crate syntax_pos;
 
 use super::facts;
-use super::facts::{PointIndex as Point, Loan, Region};
+//use super::facts::{PointIndex as Point, Loan, Region};
 use super::regions;
 
 use std::{cell};
 use std::env;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::fs::File;
 use std::io::{self, Write, BufWriter};
 use std::path::PathBuf;
-use std::env::set_var;
+//use std::env::set_var;
 use self::polonius_engine::{Algorithm, Output};
 use rustc::hir::{self, intravisit};
 use rustc::mir;
@@ -36,8 +29,6 @@ use rustc::ty::TyCtxt;
 use self::rustc_data_structures::indexed_vec::Idx;
 use syntax::ast;
 use syntax::codemap::Span;
-//use facts;
-//use regions;
 
 
 
@@ -279,7 +270,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         Ok(())
     }
 
-    /// Print the subset relation at the beginning of the given location.
+    /*
+	/// Print the subset relation at the beginning of the given location.
     fn print_subsets(&self, location: mir::Location) -> Result<(),io::Error> {
         let bb = location.block;
         let start_point = self.get_point(location, facts::PointType::Start);
@@ -298,7 +290,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
         }
         Ok(())
-    }
+    }*/
 
     fn print_borrow_regions(&self) -> Result<(),io::Error> {
         /*if !self.show_borrow_regions() {
