@@ -93,6 +93,8 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         let all_facts = facts_loader.facts;
         let output = Output::compute(&all_facts, Algorithm::Naive, true);
 
+        println!("errors: {:?}", output.errors);
+
         let mir = self.tcx.mir_validated(def_id).borrow();
         //let loop_info = loops::ProcedureLoops::new(&mir);
 
