@@ -1,6 +1,6 @@
 pub extern crate csv;
 extern crate datafrog;
-pub extern crate polonius;
+//pub extern crate polonius;
 pub extern crate polonius_engine;
 pub extern crate regex;
 pub extern crate rustc;
@@ -95,6 +95,8 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 
         println!("errors: {:?}", output.errors);
 
+
+
         let mir = self.tcx.mir_validated(def_id).borrow();
         //let loop_info = loops::ProcedureLoops::new(&mir);
 
@@ -124,6 +126,13 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 			variable_regions: variable_regions,
         };
         mir_info_printer.print_info();
+
+        /*for (point, loan) in output.errors.iter(){
+                    let error_point = point;
+                    let error_loans = loan;
+
+                    mir_info_printer.print_error(error_point, error_loans);
+                }*/
 
         trace!("[visit_fn] exit");
     }
@@ -185,20 +194,61 @@ macro_rules! to_sorted_string {
 
 impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
+
+
     pub fn print_info(&mut self) -> Result<(),io::Error> {
-        write_graph!(self, "digraph G {{\n");
+        //write_graph!(self, "digraph G {{\n");
         for bb in self.mir.basic_blocks().indices() {
             self.visit_basic_block(bb);
         }
-        self.print_temp_variables();
+        self.print_error();
+        /*self.print_temp_variables();
         self.print_blocked(mir::RETURN_PLACE, mir::Location {
             block: mir::BasicBlock::new(0),
             statement_index: 0,
         });
         self.print_borrow_regions();
         self.print_restricts();
-        write_graph!(self, "}}\n");
+        write_graph!(self, "}}\n");*/
         Ok(())
+    }
+
+    fn print_error(&self){
+        for (point, loans) in self.borrowck_out_facts.errors.iter(){
+            let err_point_ind = point;
+            let err_loans = loans;
+            let err_point = self.interner.get_point(*err_point_ind);
+            let err_location = err_point.location;
+            //println!("error location: {:?}", err_location);
+            let err_block = &self.mir[err_location.block];
+            //println!("error block: {:?}", err_block);
+            let err_stmt = &err_block.statements[err_location.statement_index];
+            //println!("source: {:?}", err_stmt.source_info);
+            println!("error source: {:?}", err_stmt.source_info.span);
+
+            let mut borrow_points = Vec::new();
+            for loan in err_loans{
+                for (point, borrows) in self.borrowck_out_facts.borrow_live_at.iter(){
+                    if borrows.contains(loan) {
+                        borrow_points.push(point);
+
+                    }
+                }
+            }
+            borrow_points.sort();
+            let borrow_point_ind = borrow_points[0];
+            //println!("borrow point test2: {:?}", borrow_point);
+            //println!("borrow point: {:?}", self.interner.get_point(*borrow_point));
+            let borrow_point = self.interner.get_point(*borrow_point_ind);
+            let borrow_location = borrow_point.location;
+            let borrow_block = &self.mir[borrow_location.block];
+            let borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
+            println!("borrow source: {:?}", borrow_stmt.source_info.span);
+
+        }
+
+
+
     }
 
     fn print_temp_variables(&self) -> Result<(),io::Error> {
