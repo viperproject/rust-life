@@ -227,6 +227,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             println!("error source: {:?}", err_stmt.source_info.span);
 
             let mut borrow_points = Vec::new();
+            //let mut regions_points = Vec::new();
             for loan in err_loans{
                 for (point, borrows) in self.borrowck_out_facts.borrow_live_at.iter(){
                     if borrows.contains(loan) {
@@ -234,16 +235,41 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
                     }
                 }
+
+                /*for (point, region_map) in self.borrowck_out_facts.restricts.iter(){
+                    for (region, borrows) in region_map.iter(){
+                        if borrows.contains(loan) {
+                            //println!("region: {:?}", region);
+                            regions_points.push((point,region));
+                        }
+                    }
+                }*/
             }
+            /*regions_points.sort();
+            println!("region: {:?}",regions_points[0]);
+            println!("region: {:?}",regions_points[regions_points.len()-1]);*/
             borrow_points.sort();
-            let borrow_point_ind = borrow_points[0];
+            let mut borrow_point_ind = borrow_points[0];
             //println!("borrow point test2: {:?}", borrow_point);
             //println!("borrow point: {:?}", self.interner.get_point(*borrow_point));
-            let borrow_point = self.interner.get_point(*borrow_point_ind);
-            let borrow_location = borrow_point.location;
-            let borrow_block = &self.mir[borrow_location.block];
-            let borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
+            let mut borrow_point = self.interner.get_point(*borrow_point_ind);
+            let mut borrow_location = borrow_point.location;
+            let mut borrow_block = &self.mir[borrow_location.block];
+            let mut borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
             println!("borrow source: {:?}", borrow_stmt.source_info.span);
+
+
+
+            /*
+            borrow_point_ind = borrow_points[borrow_points.len()-1];
+            //println!("borrow point test2: {:?}", borrow_point);
+            //println!("borrow point: {:?}", self.interner.get_point(*borrow_point));
+            borrow_point = self.interner.get_point(*borrow_point_ind);
+            borrow_location = borrow_point.location;
+            borrow_block = &self.mir[borrow_location.block];
+            borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
+            println!("borrow source: {:?}", borrow_stmt.source_info.span);
+            */
 
         }
 
