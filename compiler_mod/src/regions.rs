@@ -21,6 +21,7 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     let fn_sig = Regex::new(r"^fn [a-zA-Z\d_]+\((?P<args>.*)\) -> (?P<result>.*)\{$").unwrap();
     let arg = Regex::new(r"^_(?P<local>\d+): &'(?P<rvid>\d+)rv (mut)? [a-zA-Z\d_]+\s*$").unwrap();
     let local = Regex::new(r"^\s+let mut _(?P<local>\d+): &'(?P<rvid>\d+)rv ").unwrap();
+    let scope_local = Regex::new(r"").unwrap();
     for line in io::BufReader::new(file).lines() {
         let line = line?;
         if let Some(caps) = fn_sig.captures(&line) {
@@ -38,6 +39,12 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
             debug!("local {} rvid {}", &local_caps["local"], &local_caps["rvid"]);
             let local: usize = (&local_caps["local"]).parse().unwrap();
             let rvid: usize = (&local_caps["rvid"]).parse().unwrap();
+            variable_regions.insert(mir::Local::new(local), rvid.into());
+        }
+        if let Some(scope_local_caps) = scope_local.captures(&line) {
+            debug!("local {} rvid {}", &scope_local_caps["local"], &scope_local_caps["rvid"]);
+            let local: usize = (&scope_local_caps["local"]).parse().unwrap();
+            let rvid: usize = (&scope_local_caps["rvid"]).parse().unwrap();
             variable_regions.insert(mir::Local::new(local), rvid.into());
         }
     }

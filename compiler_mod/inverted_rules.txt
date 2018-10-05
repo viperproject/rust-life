@@ -1,0 +1,110 @@
+===============
+Polonius-Rules:
+===============
+
+error(P) :-
+  invalidates(P, L),
+  loan_live_at(L, P).
+
+
+loan_live_at(L, P) :-
+  region_live_at(R, P),
+   requires(R, L, P).
+
+
+requires(R2, B, P) :-
+   requires(R1, B, P),
+   subset(R1, R2, P).
+
+
+requires(R, B, Q) :-
+   requires(R, B, P),
+   !killed(B, P),
+   cfg_edge(P, Q),
+   region_live_at(R, Q).
+
+
+subset(R1, R2, P) :-
+   outlives(R1, R2, P).
+
+
+subset(R1, R3, P) :-
+   subset(R1, R2, P),
+   subset(R2, R3, P).
+
+
+subset(R1, R2, Q) :-
+   subset(R1, R2, P),
+   cfg_edge(P, Q),
+   region_live_at(R1, Q),
+   region_live_at(R2, Q).
+
+
+================
+Inverted Rules:
+================
+
+expl_invalidates(P, L) :-
+   expl_error(P),
+   invalidates(P, L),
+   loan_live_at(L, P).
+
+expl_loan_live_at(L, P) :-
+   expl_error(P),
+   invalidates(P, L),
+   loan_live_at(L, P).
+
+
+expl_region_live_at(R, P) :-
+   expl_loan_live_at(L, P)
+   region_live_at(R, P),
+   requires(R, L, P).
+
+expl_requires(R, L, P) :-
+   expl_loan_live_at(L, P)
+   region_live_at(R, P),
+   requires(R, L, P).
+
+
+expl_requires(R1, B, P) :-
+   expl_requires(R2, B, P)
+   requires(R1, B, P),
+   subset(R1, R2, P).
+
+expl_subset(R1, R2, P) :-
+   expl_requires(R2, B, P)
+   requires(R1, B, P),
+   subset(R1, R2, P).
+
+
+expl_requires(R, B, P) :-
+   expl_requires(R, B, Q),
+   requires(R, B, P),
+   !killed(B, P),
+   cfg_edge(P, Q),
+   region_live_at(R, Q).
+
+
+expl_outlives(R1, R2, P) :-
+   expl_subset(R1, R2, P),
+   outlives(R1, R2, P).
+
+
+expl_subset(R1,R2, P) :-
+   expl_subset(R1, R3, P),
+   subset(R1, R2, P),
+   subset(R2, R3, P).
+
+expl_subset(R2, R3, P) :-
+   expl_subset(R1, R3, P),
+   subset(R1, R2, P),
+   subset(R2, R3, P).
+
+
+expl_subset(R1, R2, P) :-
+   expl_subset(R1, R2, Q),
+   subset(R1, R2, P),
+   cfg_edge(P, Q),
+   region_live_at(R1, Q),
+   region_live_at(R2, Q).
+
