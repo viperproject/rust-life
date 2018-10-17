@@ -17,7 +17,7 @@ use super::regions;
 
 use std::{cell};
 use std::env;
-use std::collections::{HashMap};
+use std::collections::{HashMap,BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Write, BufWriter};
 use std::path::PathBuf;
@@ -27,8 +27,10 @@ use rustc::hir::{self, intravisit};
 use rustc::mir;
 use rustc::ty::TyCtxt;
 use self::rustc_data_structures::indexed_vec::Idx;
+use self::rustc_data_structures::fx::FxHashMap;
 use syntax::ast;
 use syntax::codemap::Span;
+use self::datafrog::Relation;
 
 
 
@@ -92,6 +94,13 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 
         let all_facts = facts_loader.facts;
         let output = Output::compute(&all_facts, Algorithm::Naive, true);
+/*
+        for (point, loans) in output.errors.iter() {
+            let expl_output = compute_error_expl(&all_facts, output);
+        }
+*/
+        //let errortest = output.errors.test();
+       // let expl_output = compute_error_expl(&all_facts, output, output.errors[0]);
 
         println!("errors: {:?}", output.errors);
 
@@ -137,6 +146,259 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         trace!("[visit_fn] exit");
     }
 }
+
+struct ExplOutput{
+    pub expl_outlives: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Region>>>,
+    pub expl_subset: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Region>>>,
+    pub expl_requires: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Loan>>>,
+    pub expl_borrow_live_at: FxHashMap<facts::PointIndex, Vec<facts::Loan>>,
+
+}
+
+impl ExplOutput{
+
+    fn new() -> Self{
+        ExplOutput{
+            expl_outlives: FxHashMap::default(),
+            expl_subset: FxHashMap::default(),
+            expl_requires: FxHashMap::default(),
+            expl_borrow_live_at: FxHashMap::default(),
+        }
+    }
+
+}
+
+fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (&facts::PointIndex, &Vec<facts::Loan>)) -> ExplOutput {
+
+
+    use self::facts::{PointIndex as Point, Loan, Region};
+
+    let mut result = ExplOutput::new();
+
+    let expl_outlives = {
+
+        let mut iteration = datafrog::Iteration::new();
+        // .. some variables, ..
+        let subset = iteration.variable::<(Region, Region, Point)>("subset");
+        let new_subset = iteration.variable::<((Region, Region, Point),())>("new_subset");
+        let outlives = iteration.variable::<(Region, Region, Point)>("outlives");
+        let new_outlives = iteration.variable::<((Region, Region, Point),())>("new_outlives");
+        let requires = iteration.variable::<(Region, Loan, Point)>("requires");
+        let new_requires = iteration.variable::<((Region, Loan, Point),())>("new_requires");
+        let borrow_live_at = iteration.variable::<(Loan, Point)>("borrow_live_at");
+        let new_borrow_live_at = iteration.variable::<((Loan, Point), ())>("new_borrow_live_at");
+
+        // `invalidates` facts, stored ready for joins
+        let invalidates = iteration.variable::<((Loan, Point), ())>("invalidates");
+
+        // different indices for `subset`.
+        let subset_r1p = iteration.variable_indistinct("subset_r1p");
+        let subset_r2p = iteration.variable_indistinct("subset_r2p");
+        let subset_r1r2 = iteration.variable_indistinct("subset_r1r2");
+        let subset_p = iteration.variable_indistinct("subset_p");
+
+        let expl_subset_r1p = iteration.variable_indistinct("expl_subset_r1p");
+        let expl_subset_r2p = iteration.variable_indistinct("expl_subset_r2p");
+        let expl_subset_r1r2 = iteration.variable_indistinct("expl_subset_r1r2");
+        let expl_subset_p = iteration.variable_indistinct("expl_subset_p");
+
+
+        // different indexes for `requires`.
+        let requires_rp = iteration.variable_indistinct("requires_rp");
+        let requires_bp = iteration.variable_indistinct("requires_bp");
+        let requires_rb = iteration.variable_indistinct("requires_rb");
+
+        let expl_requires_rp = iteration.variable_indistinct("expl_requires_rp");
+        let expl_requires_bp = iteration.variable_indistinct("expl_requires_bp");
+        let expl_requires_rb = iteration.variable_indistinct("expl_requires_rb");
+
+        // temporaries as we perform a multi-way join.
+        let subset_1 = iteration.variable_indistinct("subset_1");
+        let subset_2 = iteration.variable_indistinct("subset_2");
+        let subset_3 = iteration.variable_indistinct("subset_3");
+        let subset_4 = iteration.variable_indistinct("subset_4");
+        let subset_5 = iteration.variable_indistinct("subset_5");
+        let subset_6 = iteration.variable_indistinct("subset_6");
+        let requires_1 = iteration.variable_indistinct("requires_1");
+        let requires_2 = iteration.variable_indistinct("requires_2");
+        let requires_3 = iteration.variable_indistinct("requires_3");
+        let requires_4 = iteration.variable_indistinct("requires_4");
+        let requires_5 = iteration.variable_indistinct("requires_5");
+
+        let killed = all_facts.killed.into();
+        let region_live_at = iteration.variable::<((Region, Point), ())>("region_live_at");
+        let cfg_edge_p = iteration.variable::<(Point, Point)>("cfg_edge_p");
+        let new_cfg_edge = iteration.variable::<((Point, Point),())>("new_cfg_edge");
+
+        let expl_error = iteration.variable::<((Loan,Point),())>("expl_error");
+        let expl_subset = iteration.variable::<(Region, Region, Point)>("expl_subset");
+        let new_expl_subset = iteration.variable::<((Region, Region, Point),())>("new_expl_subset");
+        let expl_requires = iteration.variable::<(Region, Loan, Point)>("expl_requires");
+        let expl_borrow_live_at = iteration.variable::<(Loan, Point)>("expl_borrow_live_at");
+
+        let expl_borrow_live_at_1 = iteration.variable_indistinct("expl_borrow_live_at_1");
+        let expl_borrow_live_at_p = iteration.variable_indistinct("expl_borrow_live_at_p");
+        let region_live_at_p = iteration.variable_indistinct("region_live_at_p");
+
+        let expl_outlives = iteration.variable("expl_outlives");
+
+
+        //TODO
+        expl_error.insert(Relation::from(error_fact));
+
+        outlives.insert(all_facts.outlives.into());
+        requires.insert(all_facts.borrow_region.into());
+        region_live_at.insert(Relation::from(
+            all_facts.region_live_at.iter().map(|&(r, p)| ((r, p), ())),
+        ));
+        invalidates.insert(Relation::from(
+            all_facts.invalidates.iter().map(|&(p, b)| ((b, p), ())),
+        ));
+        cfg_edge_p.insert(all_facts.cfg_edge.clone().into());
+
+        subset.insert(Relation::from(
+            output.subset.iter().flat_map(
+                |(&point, region_map)|
+                    region_map.iter().flat_map(
+                        move |(&region, regions)|
+                            regions.iter().map(move |&region2| (region, region2, point))
+                    )
+            )
+        ));
+
+        borrow_live_at.insert(Relation::from(
+            output.borrow_live_at.iter().flat_map(
+                |(&point, loans)|
+                    loans.iter().map(move |&loan| (loan, point))
+
+            )
+        ));
+
+        requires.insert(Relation::from(
+            output.restricts.iter().flat_map(
+                |(&point, region_map)|
+                    region_map.iter().flat_map(
+                        move |(&region, loans)|
+                            loans.iter().map(move |&loan| (region, loan, point))
+                    )
+            )
+        ));
+
+        while iteration.changed() {
+
+            subset
+                .recent
+                .borrow_mut()
+                .elements
+                .retain(|&(r1, r2, _)| r1 != r2);
+
+            // remap fields to re-index by keys.
+            subset_r1p.from_map(&subset, |&(r1, r2, p)| ((r1, p), r2));
+            subset_r2p.from_map(&subset, |&(r1, r2, p)| ((r2, p), r1));
+            subset_r1r2.from_map(&subset, |&(r1, r2, p)| ((r1, r2), p));
+            subset_p.from_map(&subset, |&(r1, r2, p)| (p, (r1, r2)));
+
+            requires_rp.from_map(&requires, |&(r, b, p)| ((r, p), b));
+            requires_bp.from_map(&requires, |&(r, b, p)| ((b, p), r));
+            requires_rb.from_map(&requires, |&(r, b, p)| ((r, b), p));
+
+            new_borrow_live_at.from_map(&borrow_live_at, |&(b, p)| ((b, p), ()));
+            new_requires.from_map(&requires, |&(r, b, p)| ((r, b, p), ()));
+            new_outlives.from_map(&outlives, |&(r1, r2, p)| ((r1, r2, p), ()));
+            new_cfg_edge.from_map(&cfg_edge_p, |&(p1, p2)| ((p1, p2), ()));
+            region_live_at_p.from_map(&region_live_at, |&((r, p),())| (p, r));
+
+
+            //inverted rules
+            expl_borrow_live_at_1.from_join(&expl_error, &invalidates, |&(b,p),&(),&()| ((b,p),()));
+            expl_borrow_live_at.from_join(&expl_borrow_live_at_1, &new_borrow_live_at, |&(b,p),&(), &()| (b, p));
+
+            expl_borrow_live_at_p.from_map(&expl_borrow_live_at, |&(b,p)| (p, b));
+
+            requires_1.from_join(&expl_borrow_live_at_p, &region_live_at_p, |&p, &b, &r| ((r, b, p),()));
+            expl_requires.from_join(&requires_1, &new_requires, |&(r, b, p), &(), &()| (r,b,p));
+
+            expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| ((b, p), r));
+            new_subset.from_map(&subset, |&(r1, r2, p)| ((r1, r2, p), ()));
+            requires_2.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
+            expl_requires.from_join(&requires_2, &new_subset, |&(r1, r2, p), &b,&()| (r1,b,p));
+
+            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
+            expl_subset.from_join(&subset_1, &new_subset, |&(r1, r2, p), &b,&()| (r1,r2,p));
+
+            requires_3.from_join(&expl_requires_rb, &requires_rb, |&(r, b), &p1, &p2| ((b,p2),(r,p1)));
+            requires_4.from_antijoin(&requires_3, &killed, |&(b,p2),&(r,p1)| ((p2,p1),(b,r)));
+            requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| ((r,p1),(b,p2)));
+            expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()|(r,b,p2));
+
+            expl_subset_r1p.from_map(&expl_subset, |&(r1, r2, p)| ((r1, p), r2));
+
+            subset_2.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| ((r2,r3,p),()));
+            expl_subset.from_join(&subset_2, &new_subset, |&(r2, r3, p), &(),&()| (r2,r3,p));
+
+            subset_3.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| ((r2,r3,p),(r1)));
+            expl_subset.from_join(&subset_3, &new_subset, |&(r2, r3, p), &r1,&()| (r1,r2,p));
+
+            expl_subset_r1r2.from_map(&expl_subset, |&(r1, r2, p)| ((r1, r2), p));
+
+            subset_4.from_join(&expl_subset_r1r2, &subset_r1r2, |&(r1, r2), &p1, &p2| ((p2,p1),(r1,r2)));
+            subset_5.from_join(&subset_4, &new_cfg_edge, |&(p2,p1),&(r1,r2),&()| ((r1,p1),(r2,p2)));
+            subset_6.from_join(&subset_5, &region_live_at, |&(r1,p1), &(r2,p2), &()| ((r2,p1),(r1,p2)));
+            expl_subset.from_join(&subset_6, &region_live_at, |&(r2,p1), &(r1,p2), &()| (r1, r2, p2));
+
+            expl_outlives.from_join(&new_expl_subset, &new_outlives, |&(r1,r2,p), &(), &()| (r1,r2,p));
+        }
+
+        let expl_subset = expl_subset.complete();
+        for (r1, r2, location) in &expl_subset.elements {
+            result
+                .expl_subset
+                .entry(*location)
+                .or_insert(BTreeMap::new())
+                .entry(*r1)
+                .or_insert(BTreeSet::new())
+                .insert(*r2);
+        }
+
+        let expl_requires = expl_requires.complete();
+        for (region, borrow, location) in &expl_requires.elements {
+            result
+                .expl_requires
+                .entry(*location)
+                .or_insert(BTreeMap::new())
+                .entry(*region)
+                .or_insert(BTreeSet::new())
+                .insert(*borrow);
+        }
+
+
+        let expl_borrow_live_at = expl_borrow_live_at.complete();
+        for (borrow, location) in &expl_borrow_live_at.elements {
+            result
+                .expl_borrow_live_at
+                .entry(*location)
+                .or_insert(Vec::new())
+                .push(*borrow);
+        }
+
+        expl_outlives.complete();
+
+    };
+
+    for (r1, r2, location) in &expl_outlives.elements {
+        result
+            .expl_outlives
+            .entry(*location)
+            .or_insert(BTreeMap::new())
+            .entry(*r1)
+            .or_insert(BTreeSet::new())
+            .insert(*r2);
+    }
+
+    result
+
+}
+
 
 
 
@@ -247,13 +509,19 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
             regions_points.sort();
             for region in regions_points.iter(){
-                println!("region: {:?}",region);
+                //println!("region: {:?}",region);
                 let region_req = *region;
                 for (local, rv) in self.variable_regions.iter(){
                     if region_req == rv{
-                        println!("variable: {:?}", local);
+                        //println!("mir variable: {:?}", local);
+                        let local_decl = &self.mir.local_decls[*local];
+                        //println!("localDecl: {:?}",local_decl)
+                        let local_name = local_decl.name.unwrap().to_string();
+                        let local_source = local_decl.source_info.span;
+                        println!("Var: {:?}", local_name);
+                        println!("var source: {:?}", local_source);
                     }
-                    println!("region test: {:?}", rv);
+                    //println!("region test: {:?}", rv);
                 }
 
             }
@@ -269,17 +537,17 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             println!("borrow source: {:?}", borrow_stmt.source_info.span);
 
 
+            let expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (err_point_ind, err_loans));
 
-            /*
-            borrow_point_ind = borrow_points[borrow_points.len()-1];
-            //println!("borrow point test2: {:?}", borrow_point);
-            //println!("borrow point: {:?}", self.interner.get_point(*borrow_point));
-            borrow_point = self.interner.get_point(*borrow_point_ind);
-            borrow_location = borrow_point.location;
-            borrow_block = &self.mir[borrow_location.block];
-            borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
-            println!("borrow source: {:?}", borrow_stmt.source_info.span);
-            */
+            //let expl_output = ExplOutput::new();
+            //TODO
+            for (point, region_map) in expl_output.expl_outlives.iter(){
+                for (region, regions2) in region_map.iter(){
+                    //
+                }
+            }
+
+
 
         }
 

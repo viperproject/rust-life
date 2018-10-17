@@ -20,8 +20,9 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     let file = File::open(path)?;
     let fn_sig = Regex::new(r"^fn [a-zA-Z\d_]+\((?P<args>.*)\) -> (?P<result>.*)\{$").unwrap();
     let arg = Regex::new(r"^_(?P<local>\d+): &'(?P<rvid>\d+)rv (mut)? [a-zA-Z\d_]+\s*$").unwrap();
-    let local = Regex::new(r"^\s+let mut _(?P<local>\d+): &'(?P<rvid>\d+)rv ").unwrap();
-    let scope_local = Regex::new(r"").unwrap();
+    let local = Regex::new(r"^\s+let (mut)? _(?P<local>\d+): &'(?P<rvid>\d+)rv ").unwrap();
+    let local2 = Regex::new(r"^\s+let (mut)? _(?P<local>\d+): ([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
+    let local3 = Regex::new(r"^\s+let (mut)? _(?P<local>\d+): &'(\d+)rv ([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
     for line in io::BufReader::new(file).lines() {
         let line = line?;
         if let Some(caps) = fn_sig.captures(&line) {
@@ -41,10 +42,16 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
             let rvid: usize = (&local_caps["rvid"]).parse().unwrap();
             variable_regions.insert(mir::Local::new(local), rvid.into());
         }
-        if let Some(scope_local_caps) = scope_local.captures(&line) {
-            debug!("local {} rvid {}", &scope_local_caps["local"], &scope_local_caps["rvid"]);
-            let local: usize = (&scope_local_caps["local"]).parse().unwrap();
-            let rvid: usize = (&scope_local_caps["rvid"]).parse().unwrap();
+        if let Some(local2_caps) = local2.captures(&line) {
+            debug!("local {} rvid {}", &local2_caps["local"], &local2_caps["rvid"]);
+            let local: usize = (&local2_caps["local"]).parse().unwrap();
+            let rvid: usize = (&local2_caps["rvid"]).parse().unwrap();
+            variable_regions.insert(mir::Local::new(local), rvid.into());
+        }
+        if let Some(local3_caps) = local3.captures(&line) {
+            debug!("local {} rvid {}", &local3_caps["local"], &local3_caps["rvid"]);
+            let local: usize = (&local3_caps["local"]).parse().unwrap();
+            let rvid: usize = (&local3_caps["rvid"]).parse().unwrap();
             variable_regions.insert(mir::Local::new(local), rvid.into());
         }
     }

@@ -44,21 +44,11 @@ subset(R1, R2, Q) :-
 Inverted Rules:
 ================
 
-expl_invalidates(P, L) :-
-   expl_error(P),
-   invalidates(P, L),
-   loan_live_at(L, P).
-
 expl_loan_live_at(L, P) :-
    expl_error(P),
    invalidates(P, L),
    loan_live_at(L, P).
 
-
-expl_region_live_at(R, P) :-
-   expl_loan_live_at(L, P)
-   region_live_at(R, P),
-   requires(R, L, P).
 
 expl_requires(R, L, P) :-
    expl_loan_live_at(L, P)
