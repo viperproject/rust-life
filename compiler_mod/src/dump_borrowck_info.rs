@@ -168,7 +168,7 @@ impl ExplOutput{
 
 }
 
-fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (&facts::PointIndex, &Vec<facts::Loan>)) -> ExplOutput {
+fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (facts::PointIndex, Vec<facts::Loan>)) -> ExplOutput {
 
 
     use self::facts::{PointIndex as Point, Loan, Region};
@@ -198,9 +198,8 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
         let subset_p = iteration.variable_indistinct("subset_p");
 
         let expl_subset_r1p = iteration.variable_indistinct("expl_subset_r1p");
-        let expl_subset_r2p = iteration.variable_indistinct("expl_subset_r2p");
         let expl_subset_r1r2 = iteration.variable_indistinct("expl_subset_r1r2");
-        let expl_subset_p = iteration.variable_indistinct("expl_subset_p");
+        //let expl_subset_p = iteration.variable_indistinct("expl_subset_p");
 
 
         // different indexes for `requires`.
@@ -208,7 +207,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
         let requires_bp = iteration.variable_indistinct("requires_bp");
         let requires_rb = iteration.variable_indistinct("requires_rb");
 
-        let expl_requires_rp = iteration.variable_indistinct("expl_requires_rp");
+        //let expl_requires_rp = iteration.variable_indistinct("expl_requires_rp");
         let expl_requires_bp = iteration.variable_indistinct("expl_requires_bp");
         let expl_requires_rb = iteration.variable_indistinct("expl_requires_rb");
 
@@ -225,12 +224,14 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
         let requires_4 = iteration.variable_indistinct("requires_4");
         let requires_5 = iteration.variable_indistinct("requires_5");
 
-        let killed = all_facts.killed.into();
+        let killed = all_facts.killed.clone().into();
         let region_live_at = iteration.variable::<((Region, Point), ())>("region_live_at");
         let cfg_edge_p = iteration.variable::<(Point, Point)>("cfg_edge_p");
         let new_cfg_edge = iteration.variable::<((Point, Point),())>("new_cfg_edge");
 
-        let expl_error = iteration.variable::<((Loan,Point),())>("expl_error");
+        let init_expl_error = iteration.variable::<(Point,Loan)>("init_expl_error");
+        let expl_error = iteration.variable::<(Loan,Point)>("expl_error");
+        let new_expl_error = iteration.variable::<((Loan,Point),())>("new_expl_error");
         let expl_subset = iteration.variable::<(Region, Region, Point)>("expl_subset");
         let new_expl_subset = iteration.variable::<((Region, Region, Point),())>("new_expl_subset");
         let expl_requires = iteration.variable::<(Region, Loan, Point)>("expl_requires");
@@ -243,11 +244,14 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
         let expl_outlives = iteration.variable("expl_outlives");
 
 
+        let expl_error_vec = vec![error_fact];
         //TODO
-        expl_error.insert(Relation::from(error_fact));
+        expl_error.insert(Relation::from(expl_error_vec.iter().flat_map(
+            |(point, loans)| loans.iter().map(move |&loan|  (loan, *point))
+        )));
 
-        outlives.insert(all_facts.outlives.into());
-        requires.insert(all_facts.borrow_region.into());
+        outlives.insert(all_facts.outlives.clone().into());
+        requires.insert(all_facts.borrow_region.clone().into());
         region_live_at.insert(Relation::from(
             all_facts.region_live_at.iter().map(|&(r, p)| ((r, p), ())),
         ));
@@ -308,45 +312,53 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             new_cfg_edge.from_map(&cfg_edge_p, |&(p1, p2)| ((p1, p2), ()));
             region_live_at_p.from_map(&region_live_at, |&((r, p),())| (p, r));
 
+            //expl_error.from_map(&init_expl_error, |&(p, b)| (b, p));
+            new_expl_error.from_map(&expl_error, |&(b, p)| ((b, p), ()));
+
 
             //inverted rules
-            expl_borrow_live_at_1.from_join(&expl_error, &invalidates, |&(b,p),&(),&()| ((b,p),()));
-            expl_borrow_live_at.from_join(&expl_borrow_live_at_1, &new_borrow_live_at, |&(b,p),&(), &()| (b, p));
+            expl_borrow_live_at_1.from_join(&new_expl_error, &invalidates, |&(b,p),&(),&()| ((b,p),()));
+            expl_borrow_live_at.from_join(&expl_borrow_live_at_1, &new_borrow_live_at, |&(b,p),&(), &()| {debug!("1{:?}",(b,p));(b, p)});
 
             expl_borrow_live_at_p.from_map(&expl_borrow_live_at, |&(b,p)| (p, b));
 
             requires_1.from_join(&expl_borrow_live_at_p, &region_live_at_p, |&p, &b, &r| ((r, b, p),()));
-            expl_requires.from_join(&requires_1, &new_requires, |&(r, b, p), &(), &()| (r,b,p));
+            expl_requires.from_join(&requires_1, &new_requires, |&(r, b, p), &(), &()| {debug!("2{:?}",(r,b,p));(r,b,p)});
 
             expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| ((b, p), r));
             new_subset.from_map(&subset, |&(r1, r2, p)| ((r1, r2, p), ()));
+            
             requires_2.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
-            expl_requires.from_join(&requires_2, &new_subset, |&(r1, r2, p), &b,&()| (r1,b,p));
-
-            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
-            expl_subset.from_join(&subset_1, &new_subset, |&(r1, r2, p), &b,&()| (r1,r2,p));
+            expl_requires.from_join(&requires_2, &new_subset, |&(r1, r2, p), &b,&()| {debug!("3{:?}",(r1,b,p));(r1,b,p)});
 
             requires_3.from_join(&expl_requires_rb, &requires_rb, |&(r, b), &p1, &p2| ((b,p2),(r,p1)));
             requires_4.from_antijoin(&requires_3, &killed, |&(b,p2),&(r,p1)| ((p2,p1),(b,r)));
-            requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| ((r,p1),(b,p2)));
-            expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()|(r,b,p2));
+            requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| {debug!("4.1{:?}",((r,p1),(b,p2)));((r,p1),(b,p2))});
+            expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()| {debug!("4{:?}",(r,b,p2));(r,b,p2)});
+
+            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
+            expl_subset.from_join(&subset_1, &new_subset, |&(r1, r2, p), &b,&()| {debug!("5{:?}",(r1,r2,p));(r1,r2,p)});
+
+
 
             expl_subset_r1p.from_map(&expl_subset, |&(r1, r2, p)| ((r1, p), r2));
 
-            subset_2.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| ((r2,r3,p),()));
-            expl_subset.from_join(&subset_2, &new_subset, |&(r2, r3, p), &(),&()| (r2,r3,p));
+            subset_2.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| {debug!("6.1{:?}",(r2,r3,p));((r2,r3,p),())});
+            expl_subset.from_join(&subset_2, &new_subset, |&(r2, r3, p), &(),&()| {debug!("6{:?}",(r2,r3,p));(r2,r3,p)});
 
-            subset_3.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| ((r2,r3,p),(r1)));
-            expl_subset.from_join(&subset_3, &new_subset, |&(r2, r3, p), &r1,&()| (r1,r2,p));
+            subset_3.from_join(&expl_subset_r1p, &subset_r1p, |&(r1, p), &r3, &r2| {debug!("7.1{:?}",((r2,r3,p),(r1)));((r2,r3,p),(r1))});
+            expl_subset.from_join(&subset_3, &new_subset, |&(r2, r3, p), &r1,&()| {debug!("7{:?}",(r1,r2,p));(r1,r2,p)});
 
             expl_subset_r1r2.from_map(&expl_subset, |&(r1, r2, p)| ((r1, r2), p));
 
-            subset_4.from_join(&expl_subset_r1r2, &subset_r1r2, |&(r1, r2), &p1, &p2| ((p2,p1),(r1,r2)));
-            subset_5.from_join(&subset_4, &new_cfg_edge, |&(p2,p1),&(r1,r2),&()| ((r1,p1),(r2,p2)));
-            subset_6.from_join(&subset_5, &region_live_at, |&(r1,p1), &(r2,p2), &()| ((r2,p1),(r1,p2)));
-            expl_subset.from_join(&subset_6, &region_live_at, |&(r2,p1), &(r1,p2), &()| (r1, r2, p2));
+            subset_4.from_join(&expl_subset_r1r2, &subset_r1r2, |&(r1, r2), &p1, &p2| {debug!("8.1{:?}",((p2,p1),(r1,r2)));((p2,p1),(r1,r2))});
+            subset_5.from_join(&subset_4, &new_cfg_edge, |&(p2,p1),&(r1,r2),&()| {debug!("8.2{:?}",((r1,p1),(r1,p1)));((r1,p1),(r2,p2))});
+            subset_6.from_join(&subset_5, &region_live_at, |&(r1,p1), &(r2,p2), &()| {debug!("8.3{:?}",((r2,p1),(r1,p2)));((r2,p1),(r1,p2))});
+            expl_subset.from_join(&subset_6, &region_live_at, |&(r2,p1), &(r1,p2), &()| {debug!("8{:?}",(r1,r2,p2));(r1, r2, p2)});
 
-            expl_outlives.from_join(&new_expl_subset, &new_outlives, |&(r1,r2,p), &(), &()| (r1,r2,p));
+            new_expl_subset.from_map(&expl_subset, |&(r1,r2,p)| ((r1,r2,p),()));
+            expl_outlives.from_join(&new_expl_subset, &new_outlives, |&(r1,r2,p), &(), &()| {debug!("9{:?}",(r1,r2,p));(r1,r2,p)});
+
         }
 
         let expl_subset = expl_subset.complete();
@@ -381,10 +393,11 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
                 .push(*borrow);
         }
 
-        expl_outlives.complete();
+        expl_outlives.complete()
 
     };
 
+    println!("ex_outlives2: {:?}",expl_outlives.elements);
     for (r1, r2, location) in &expl_outlives.elements {
         result
             .expl_outlives
@@ -501,7 +514,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 for (point, region_map) in self.borrowck_out_facts.restricts.iter(){
                     for (region, borrows) in region_map.iter(){
                         if borrows.contains(loan) && point == err_point_ind{
-                            //println!("region: {:?}", region);
+                            println!("region: {:?}", region);
                             regions_points.push(region);
                         }
                     }
@@ -537,7 +550,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             println!("borrow source: {:?}", borrow_stmt.source_info.span);
 
 
-            let expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (err_point_ind, err_loans));
+            let expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
 
             //let expl_output = ExplOutput::new();
             //TODO
@@ -546,6 +559,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     //
                 }
             }
+
+            println!("expl_out: {:?}",expl_output.expl_outlives);
+            println!("expl_sub: {:?}",expl_output.expl_subset);
+            println!("expl: {:?}",expl_output.expl_outlives);
 
 
 
