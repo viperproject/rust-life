@@ -30,6 +30,7 @@ use self::rustc_data_structures::indexed_vec::Idx;
 use self::rustc_data_structures::fx::FxHashMap;
 use syntax::ast;
 use syntax::codemap::Span;
+use syntax_pos::symbol::Symbol;
 use self::datafrog::Relation;
 
 
@@ -134,6 +135,7 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
             interner: interner,
             graph: cell::RefCell::new(graph),
 			variable_regions: variable_regions,
+            def_path: def_path,
         };
         mir_info_printer.print_info();
 
@@ -428,6 +430,7 @@ struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub interner: facts::Interner,
     pub graph: cell::RefCell<BufWriter<File>>,
 	pub variable_regions: HashMap<mir::Local, facts::Region>,
+    pub def_path: rustc::hir::map::DefPath,
 }
 
 
@@ -495,10 +498,15 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     fn print_error(&self){
 
-        let mut outlive_graph = File::create("outlive_graph.dot").expect("Unable to create file");
+
+        let expl_graph_path = PathBuf::from("nll-facts")
+            .join(self.def_path.to_filename_friendly_no_crate())
+            .join("outlive_graph.dot");
+        let mut outlive_graph = File::create(expl_graph_path).expect("Unable to create file");
         writeln!(outlive_graph,"digraph G {{");
 
         let mut expl_output= ExplOutput::new();
+        //let mut write_vec = Vec::new();
 
         for (point, loans) in self.borrowck_out_facts.errors.iter(){
             let err_point_ind = point;
@@ -602,7 +610,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     //println!("mir variable: {:?}", local);
                     let local_decl = &self.mir.local_decls[*local];
                     //println!("localDecl: {:?}",local_decl);
-                    local_name1 = local_decl.name.unwrap().to_string();
+                    local_name1 = local_decl.name.unwrap_or(Symbol::gensym("test")).to_string();
                     local_source1 = local_decl.source_info.span;
 
                 }
@@ -610,23 +618,31 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     //println!("mir variable: {:?}", local);
                     let local_decl = &self.mir.local_decls[*local];
                     //println!("localDecl: {:?}",local_decl)
-                    local_name2 = local_decl.name.unwrap().to_string();
+                    local_name2 = local_decl.name.unwrap_or(Symbol::gensym("test")).to_string();
                     local_source2 = local_decl.source_info.span;
+                    //println!("{}",self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line);
+                    //println!("{}",self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap());
 
                 }
 
             }
-            writeln!(outlive_graph, "{:?} [ label = \" {}: {:?} \" ]", region1, local_name1, region1);
-            println!("debug");
+            let mut points_sort = points.clone();
+            points_sort.sort();
+            writeln!(outlive_graph,"{:?} [ label = \" {}: {:?} \" ]\n", region1, local_name1, region1);
+            //write!(outlive_graph, "{}", test_str).ok().unwrap();
+            //outlive_graph.write_str( &format!("{:?} [ label = \" {}: {:?} \" ]", region1, local_name1, region1));
+            //println!("debug {:?}", i);
             writeln!(outlive_graph, "{:?} [ label = \" {}: {:?} \" ]", region2, local_name2, region2);
-            writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ {:?} outlives {:?} | {:?} }} \" ]", i, region1, region2, points);
+            writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ {:?} outlives {:?} | {:?} }} \" ]", i, region1, region2, points_sort[0]);
             writeln!(outlive_graph, "{:?} -> {:?} -> {:?}", region1, i, region2);
+            //let test="test";
+            //writeln!(outlive_graph,"x {:?} -> [{}]",test,test);
+            //println!("{}", write_vec.join("\n"));
 
             i+=1;
         }
 
-        let test="test";
-        writeln!(outlive_graph,"{:?} -> {}",test,test);
+
         writeln!(outlive_graph,"}}");
 
     }
