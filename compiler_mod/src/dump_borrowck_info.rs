@@ -109,6 +109,7 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         let mir = self.tcx.mir_validated(def_id).borrow();
         //let loop_info = loops::ProcedureLoops::new(&mir);
 
+
         let graph_path = PathBuf::from("nll-facts")
             .join(def_path.to_filename_friendly_no_crate())
             .join("graph.dot");
@@ -245,7 +246,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
 
         let expl_error_vec = vec![error_fact];
-        //TODO
+
         expl_error.insert(Relation::from(expl_error_vec.iter().flat_map(
             |(point, loans)| loans.iter().map(move |&loan|  (loan, *point))
         )));
@@ -327,13 +328,16 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
             expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| ((b, p), r));
             new_subset.from_map(&subset, |&(r1, r2, p)| ((r1, r2, p), ()));
-            
+
             requires_2.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
             expl_requires.from_join(&requires_2, &new_subset, |&(r1, r2, p), &b,&()| {debug!("3{:?}",(r1,b,p));(r1,b,p)});
 
-            requires_3.from_join(&expl_requires_rb, &requires_rb, |&(r, b), &p1, &p2| ((b,p2),(r,p1)));
-            requires_4.from_antijoin(&requires_3, &killed, |&(b,p2),&(r,p1)| ((p2,p1),(b,r)));
-            requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| {debug!("4.1{:?}",((r,p1),(b,p2)));((r,p1),(b,p2))});
+
+            expl_requires_rb.from_map(&expl_requires, |&(r, b, p)| ((r, b), p));
+
+            requires_3.from_join(&expl_requires_rb, &requires_rb, |&(r, b), &p1, &p2| {debug!("4.1{:?}",((b,p2),(r,p1)));((b,p2),(r,p1))});
+            requires_4.from_antijoin(&requires_3, &killed, |&(b,p2),&(r,p1)| {debug!("4.2{:?}",((p2,p1),(b,r)));((p2,p1),(b,r))});
+            requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| {debug!("4.3{:?}",((r,p1),(b,p2)));((r,p1),(b,p2))});
             expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()| {debug!("4{:?}",(r,b,p2));(r,b,p2)});
 
             subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
@@ -397,7 +401,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
     };
 
-    println!("ex_outlives2: {:?}",expl_outlives.elements);
+    //println!("ex_outlives2: {:?}",expl_outlives.elements);
     for (r1, r2, location) in &expl_outlives.elements {
         result
             .expl_outlives
@@ -407,6 +411,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             .or_insert(BTreeSet::new())
             .insert(*r2);
     }
+
 
     result
 
@@ -473,9 +478,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     pub fn print_info(&mut self) -> Result<(),io::Error> {
         //write_graph!(self, "digraph G {{\n");
-        for bb in self.mir.basic_blocks().indices() {
+        /*for bb in self.mir.basic_blocks().indices() {
             self.visit_basic_block(bb);
-        }
+        }*/
         self.print_error();
         /*self.print_temp_variables();
         self.print_blocked(mir::RETURN_PLACE, mir::Location {
@@ -483,12 +488,18 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             statement_index: 0,
         });
         self.print_borrow_regions();
-        self.print_restricts();
-        write_graph!(self, "}}\n");*/
+        self.print_restricts();*/
+        //write_graph!(self, "}}\n");
         Ok(())
     }
 
     fn print_error(&self){
+
+        let mut outlive_graph = File::create("outlive_graph.dot").expect("Unable to create file");
+        writeln!(outlive_graph,"digraph G {{");
+
+        let mut expl_output= ExplOutput::new();
+
         for (point, loans) in self.borrowck_out_facts.errors.iter(){
             let err_point_ind = point;
             let err_loans = loans;
@@ -500,6 +511,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let err_stmt = &err_block.statements[err_location.statement_index];
             //println!("source: {:?}", err_stmt.source_info);
             println!("error source: {:?}", err_stmt.source_info.span);
+
+
 
             let mut borrow_points = Vec::new();
             let mut regions_points = Vec::new();
@@ -550,25 +563,71 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             println!("borrow source: {:?}", borrow_stmt.source_info.span);
 
 
-            let expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
+            expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
 
-            //let expl_output = ExplOutput::new();
-            //TODO
-            for (point, region_map) in expl_output.expl_outlives.iter(){
-                for (region, regions2) in region_map.iter(){
-                    //
-                }
-            }
 
-            println!("expl_out: {:?}",expl_output.expl_outlives);
-            println!("expl_sub: {:?}",expl_output.expl_subset);
-            println!("expl: {:?}",expl_output.expl_outlives);
+            //println!("expl_out: {:?}",expl_output.expl_outlives);
+            //println!("expl_sub: {:?}",expl_output.expl_subset);
+            //println!("expl: {:?}",expl_output.expl_outlives);
+            //println!("ex_req: {:?}",expl_output.expl_requires);
+
 
 
 
         }
 
+        let mut outlives_at : FxHashMap<(facts::Region,facts::Region), Vec<facts::PointIndex>>;
+        outlives_at = FxHashMap::default();
+        for (point,region_map) in expl_output.expl_outlives{
+            for (region, regions) in region_map{
+                for region2 in regions{
+                    //println!("{:?} -> {:?} [LABEL=\"{:?}\"]", region, region2, point);
+                    outlives_at.entry((region, region2)).or_insert(Vec::new()).push(point);
+                }
+            }
 
+        }
+        //println!("test: {:?}", outlives_at);
+        let mut i=0;
+
+        for ((region1, region2), points) in outlives_at.iter(){
+
+            let mut local_name1 = String::default();
+            let mut local_name2 = String::default();
+            let mut local_source1;
+            let mut local_source2;
+
+            for (local, rv) in self.variable_regions.iter(){
+                if region1 == rv{
+                    //println!("mir variable: {:?}", local);
+                    let local_decl = &self.mir.local_decls[*local];
+                    //println!("localDecl: {:?}",local_decl);
+                    local_name1 = local_decl.name.unwrap().to_string();
+                    local_source1 = local_decl.source_info.span;
+
+                }
+                if region2 == rv{
+                    //println!("mir variable: {:?}", local);
+                    let local_decl = &self.mir.local_decls[*local];
+                    //println!("localDecl: {:?}",local_decl)
+                    local_name2 = local_decl.name.unwrap().to_string();
+                    local_source2 = local_decl.source_info.span;
+
+                }
+
+            }
+            writeln!(outlive_graph, "{:?} [ label = \" {}: {:?} \" ]", region1, local_name1, region1);
+            println!("debug");
+            writeln!(outlive_graph, "{:?} [ label = \" {}: {:?} \" ]", region2, local_name2, region2);
+            writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ {:?} outlives {:?} | {:?} }} \" ]", i, region1, region2, points);
+            writeln!(outlive_graph, "{:?} -> {:?} -> {:?}", region1, i, region2);
+
+            i+=1;
+        }
+
+        let test="test";
+        writeln!(outlive_graph,"{:?} -> {}",test,test);
+        writeln!(outlive_graph,"}}");
 
     }
 
