@@ -134,7 +134,7 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
         control.after_analysis.callback = Box::new(move |state| {
             trace!("[after_analysis.callback] enter");
 
-            dump_borrowck_info::dump_borrowck_info(state.tcx.unwrap());
+            dump_borrowck_info::dump_borrowck_info(state, state.tcx.unwrap());
 
             trace!("[after_analysis.callback] exit");
             old(state);
