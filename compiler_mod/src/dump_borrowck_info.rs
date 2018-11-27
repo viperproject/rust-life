@@ -1,3 +1,4 @@
+
 pub extern crate csv;
 extern crate datafrog;
 pub extern crate polonius_engine;
@@ -317,7 +318,8 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             requires_5.from_join(&requires_4, &new_cfg_edge, |&(p2,p1),&(b,r),&()| {debug!("4.3{:?}",((r,p1),(b,p2)));((r,p1),(b,p2))});
             expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()| {debug!("4{:?}",(r,b,p2));(r,b,p2)});
 
-            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
+            expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| {debug!("5.1{:?}",((b, p), r));((b, p), r)});
+            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| {debug!("5.2{:?}",((r1,r2,p),b));((r1,r2,p),b)});
             expl_subset.from_join(&subset_1, &new_subset, |&(r1, r2, p), &b,&()| {debug!("5{:?}",(r1,r2,p));(r1,r2,p)});
 
 
@@ -479,6 +481,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
         outlives_at = FxHashMap::default();
         for (point, region_map) in expl_output.expl_outlives {
+            println!("test: {:?}", point);
             for (region, regions) in region_map {
                 for region2 in regions {
                     //println!("{:?} -> {:?} [LABEL=\"{:?}\"]", region, region2, point);
@@ -486,53 +489,90 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 }
             }
         }
-        //println!("test: {:?}", outlives_at);
+        //println!("test: {}", outlives_at);
 
         let file_name = rustc_driver::driver::source_name(self.state.input).to_string();
 
 
-        let mut i = 0;
+
+
 
         let mut regions_done = Vec::new();
 
         for ((region1, region2), points) in outlives_at.iter() {
+            if regions_done.contains(&(((region2, region1), points), 0)) {
+                regions_done.remove_item(&(((region2, region1), points), 0));
+                regions_done.push((((region2, region1), points), 1))
+            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
+                regions_done.push((((region1, region2), points), 0));
+            }
+
+        }
+
+        println!("{:?}",regions_done);
+
+        let mut i = 0;
+
+        for (((region1, region2), points), eq) in regions_done.iter() {
             let mut local_name1 = String::default();
             let mut local_name2 = String::default();
             let mut local_source1;
             let mut local_source2;
+            let mut fm_ln1;
+            let mut fm_ln2;
             let mut local_source1_line = usize::default();
             let mut local_source2_line= usize::default();
             let mut local_source1_snip = String::default();
             let mut local_source2_snip= String::default();
+            let mut point_ln;
+            let mut point_snip = String::default();
+            //let mut anonym1_snip;
 
-            for (local, rv) in self.variable_regions.iter() {
-                if region1 == rv {
-                    let local_decl = &self.mir.local_decls[*local];
+            for (local_x, rv) in self.variable_regions.iter() {
+                if *region1 == rv {
+                    let local_decl = &self.mir.local_decls[*local_x];
                     if local_decl.name != None {
                         local_name1 = local_decl.name.unwrap().to_string();
                     } else {
                         local_name1 = ("anonymous Variable").to_string();
+                        /*for (block, block_data) in self.mir.basic_blocks.iter(){
+                            for stmt in block_data.statements.iter(){
+                                if self.mir.StatementKind::Assign(l, r) = stmt.kind{
+                                    match l {
+                                        local(v) => if v.index()==local_x{
+                                            local_source1 = stmt.source_info.span;
+                                        }
+                                    }
+                                }
+                            }
+                        }*/
                     }
                     local_source1 = local_decl.source_info.span;
-                    local_source1_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source1.lo()).line;
-                    //local_source1_snip = syntax::source_map.get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
-                    local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
+                    fm_ln1 = self.tcx.sess.codemap().lookup_line(local_source1.lo()).unwrap();
+                    local_source1_snip = fm_ln1.fm.get_line(fm_ln1.line).unwrap().to_string();
+                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
+                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
                 }
-                if region2 == rv {
-                    let local_decl = &self.mir.local_decls[*local];
+                else if *region2 == rv {
+                    let local_decl = &self.mir.local_decls[*local_x];
                     if local_decl.name != None {
                         local_name2 = local_decl.name.unwrap().to_string();
                     } else {
                         local_name2 = ("anonymous Variable").to_string();
                     }
                     local_source2 = local_decl.source_info.span;
-                    local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
-                    local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+                    fm_ln2 = self.tcx.sess.codemap().lookup_line(local_source2.lo()).unwrap();
+                    local_source2_snip = fm_ln2.fm.get_line(fm_ln2.line).unwrap().to_string();
+                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
+                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+                }
+                else{
+                    //TODO
                 }
             }
             let mut points_sort = points.clone();
             let mut ind = usize::max_value();
-            let mut point_x = self.interner.get_point(points_sort[0]);
+            //let mut point_x = self.interner.get_point(points_sort[0]);
             //println!("unsirted: {:?}",points_sort);
             for point in points_sort.iter(){
                 let point1 = self.interner.get_point(*point);
@@ -549,22 +589,27 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 let point_line = self.tcx.sess.codemap().lookup_char_pos_adj(point_span.lo()).line;
                 if point_line < ind {
                     ind = point_line;
-                    point_x = point1;
+                    point_ln = self.tcx.sess.codemap().lookup_line(point_span.lo()).unwrap();
+                    point_snip = point_ln.fm.get_line(point_ln.line).unwrap().to_string();
                 }
 
             }
 
+            writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ Lifetime {:?} | {}: &'{:?} | {} }}\" ]", region1, region1, local_name1, region1, local_source1_snip.replace("<", "\\<").replace(">", "\\>"));
+            writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ Lifetime {:?} | {}: &'{:?} | {} }} \" ]", region2, region2, local_name2, region2, local_source2_snip.replace("<", "\\<").replace(">", "\\>"));
 
-            if !(regions_done.contains(region1)){
-                writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ Lifetime {} defined on line {:?} | {} }}\" ]", region1, local_name1, local_source1_line, local_source1_snip);
-                regions_done.push(*region1);
+
+            if *eq==0 {
+
+                writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ Constraint | {:?} alive whenever {:?} is alive | generated at line {:?}: | {} }} \" ]", i, region1, region2, ind, point_snip);
+                writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
             }
-            if !(regions_done.contains(region2)){
-                writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ {} defined on line {:?} | {} }} \" ]", region2, local_name2, local_source2_line, local_source2_snip);
-                regions_done.push(*region2);
+
+            if *eq==1 {
+                writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ Equal | {:?} alive whenever {:?} is alive | generated at line {:?}: | {} }} \" ]", i, region1, region2, ind, point_snip);
+                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} \n", region1, i, region2);
+                writeln!(outlive_graph, "{{rank=same; {:?} {:?}}}\n", region1, region2);
             }
-            writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ Constraint | {:?} alive whenever {:?} is alive | generated at: {:?} }} \" ]", i, region1, region2, ind);
-            writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
 
             i += 1;
         }

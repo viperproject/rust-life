@@ -1,5 +1,6 @@
 #![feature(box_syntax)]
 #![feature(rustc_private)]
+#![feature(vec_remove_item)]
 
 extern crate env_logger;
 extern crate getopts;
@@ -153,7 +154,7 @@ pub fn main() {
     set_var("POLONIUS_ALGORITHM", "Naive");
     let mut args: Vec<String> = std::env::args().collect();
     args.push("-Zborrowck=mir".to_owned());
-    args.push("-Ztwo-phase-borrows".to_owned());
+    //args.push("-Ztwo-phase-borrows".to_owned());
     args.push("-Zpolonius".to_owned());
     args.push("-Znll-facts".to_owned());
     args.push("-Zidentify-regions".to_owned());
