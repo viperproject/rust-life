@@ -269,11 +269,11 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
         while iteration.changed() {
 
-            subset
+            /*subset
                 .recent
                 .borrow_mut()
                 .elements
-                .retain(|&(r1, r2, _)| r1 != r2);
+                .retain(|&(r1, r2, _)| r1 != r2);*/
 
             // remap fields to re-index by keys.
             subset_r1p.from_map(&subset, |&(r1, r2, p)| ((r1, p), r2));
@@ -307,7 +307,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| ((b, p), r));
             new_subset.from_map(&subset, |&(r1, r2, p)| ((r1, r2, p), ()));
 
-            requires_2.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| ((r1,r2,p),b));
+            requires_2.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r2, &r1| ((r1,r2,p),b));
             expl_requires.from_join(&requires_2, &new_subset, |&(r1, r2, p), &b,&()| {debug!("3{:?}",(r1,b,p));(r1,b,p)});
 
 
@@ -319,7 +319,8 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             expl_requires.from_join(&requires_5,&region_live_at,|&(r,p1),&(b,p2),&()| {debug!("4{:?}",(r,b,p2));(r,b,p2)});
 
             expl_requires_bp.from_map(&expl_requires, |&(r, b, p)| {debug!("5.1{:?}",((b, p), r));((b, p), r)});
-            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r1, &r2| {debug!("5.2{:?}",((r1,r2,p),b));((r1,r2,p),b)});
+
+            subset_1.from_join(&expl_requires_bp, &requires_bp, |&(b, p), &r2, &r1| {debug!("5.2{:?}",((r1,r2,p),b));((r1,r2,p),b)});
             expl_subset.from_join(&subset_1, &new_subset, |&(r1, r2, p), &b,&()| {debug!("5{:?}",(r1,r2,p));(r1,r2,p)});
 
 
@@ -335,7 +336,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
             expl_subset_r1r2.from_map(&expl_subset, |&(r1, r2, p)| ((r1, r2), p));
 
             subset_4.from_join(&expl_subset_r1r2, &subset_r1r2, |&(r1, r2), &p1, &p2| {debug!("8.1{:?}",((p2,p1),(r1,r2)));((p2,p1),(r1,r2))});
-            subset_5.from_join(&subset_4, &new_cfg_edge, |&(p2,p1),&(r1,r2),&()| {debug!("8.2{:?}",((r1,p1),(r1,p1)));((r1,p1),(r2,p2))});
+            subset_5.from_join(&subset_4, &new_cfg_edge, |&(p2,p1),&(r1,r2),&()| {debug!("8.2{:?}",((r1,p1),(r2,p2)));((r1,p1),(r2,p2))});
             subset_6.from_join(&subset_5, &region_live_at, |&(r1,p1), &(r2,p2), &()| {debug!("8.3{:?}",((r2,p1),(r1,p2)));((r2,p1),(r1,p2))});
             expl_subset.from_join(&subset_6, &region_live_at, |&(r2,p1), &(r1,p2), &()| {debug!("8{:?}",(r1,r2,p2));(r1, r2, p2)});
 
@@ -481,7 +482,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
         outlives_at = FxHashMap::default();
         for (point, region_map) in expl_output.expl_outlives {
-            println!("test: {:?}", point);
+            //println!("test: {:?}", point);
             for (region, regions) in region_map {
                 for region2 in regions {
                     //println!("{:?} -> {:?} [LABEL=\"{:?}\"]", region, region2, point);
@@ -509,14 +510,14 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         }
 
-        println!("{:?}",regions_done);
+        //println!("{:?}",regions_done);
 
         let mut i = 0;
 
         for (((region1, region2), points), eq) in regions_done.iter() {
             let mut local_name1 = String::default();
             let mut local_name2 = String::default();
-            let mut local_source1;
+            let mut local_source1 = syntax_pos::DUMMY_SP;
             let mut local_source2;
             let mut fm_ln1;
             let mut fm_ln2;
@@ -533,21 +534,24 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     let local_decl = &self.mir.local_decls[*local_x];
                     if local_decl.name != None {
                         local_name1 = local_decl.name.unwrap().to_string();
+                        local_source1 = local_decl.source_info.span;
                     } else {
                         local_name1 = ("anonymous Variable").to_string();
-                        /*for (block, block_data) in self.mir.basic_blocks.iter(){
+                        for block_data in self.mir.basic_blocks().iter(){
                             for stmt in block_data.statements.iter(){
-                                if self.mir.StatementKind::Assign(l, r) = stmt.kind{
+                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
                                     match l {
-                                        local(v) => if v.index()==local_x{
+                                        mir::Place::Local(v) => if v==local_x{
                                             local_source1 = stmt.source_info.span;
                                         }
+
+                                        _ => {}
                                     }
                                 }
                             }
-                        }*/
+                        }
                     }
-                    local_source1 = local_decl.source_info.span;
+
                     fm_ln1 = self.tcx.sess.codemap().lookup_line(local_source1.lo()).unwrap();
                     local_source1_snip = fm_ln1.fm.get_line(fm_ln1.line).unwrap().to_string();
                     //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
@@ -595,20 +599,28 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             }
 
-            writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ Lifetime {:?} | {}: &'{:?} | {} }}\" ]", region1, region1, local_name1, region1, local_source1_snip.replace("<", "\\<").replace(">", "\\>"));
-            writeln!(outlive_graph, "{:?} [ shape=record, color=blue, label = \" {{ Lifetime {:?} | {}: &'{:?} | {} }} \" ]", region2, region2, local_name2, region2, local_source2_snip.replace("<", "\\<").replace(">", "\\>"));
+            if local_source1_snip != String::default(){
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            }else {
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
+            }
+            if local_source2_snip != String::default(){
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            }else {
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
+            }
 
 
             if *eq==0 {
 
-                writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ Constraint | {:?} alive whenever {:?} is alive | generated at line {:?}: | {} }} \" ]", i, region1, region2, ind, point_snip);
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} alive whenever {:?} is alive </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
                 writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
             }
 
             if *eq==1 {
-                writeln!(outlive_graph, "{:?} [ shape=record, label= \" {{ Equal | {:?} alive whenever {:?} is alive | generated at line {:?}: | {} }} \" ]", i, region1, region2, ind, point_snip);
-                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} \n", region1, i, region2);
-                writeln!(outlive_graph, "{{rank=same; {:?} {:?}}}\n", region1, region2);
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} alive whenever {:?} is alive </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
+                writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
             }
 
             i += 1;

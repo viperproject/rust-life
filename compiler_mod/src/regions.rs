@@ -20,9 +20,9 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     let file = File::open(path)?;
     let fn_sig = Regex::new(r"^fn [a-zA-Z\d_]+\((?P<args>.*)\) -> (?P<result>.*)\{$").unwrap();
     let arg = Regex::new(r"^_(?P<local>\d+): &'(?P<rvid>\d+)rv (mut)? [a-zA-Z\d_]+\s*$").unwrap();
-    let local = Regex::new(r"^\s+let (mut)? _(?P<local>\d+): &'(?P<rvid>\d+)rv ").unwrap();
-    let local2 = Regex::new(r"^\s+let (mut)? _(?P<local>\d+): ([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
-    let local3 = Regex::new(r"^\s+let (mut )?_(?P<local>\d+): &'(\d+)rv (mut)? ([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
+    let local = Regex::new(r"^\s+(let )?(mut )?_(?P<local>\d+): &'(?P<rvid>\d+)rv ").unwrap();
+    let local2 = Regex::new(r"^\s+(let )?(mut )?_(?P<local>\d+): ([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
+    let local3 = Regex::new(r"^\s+(let )?(mut )?_(?P<local>\d+): &'(\d+)rv (mut )?([a-zA-Z]+::[a-zA-Z]+::[a-zA-Z]+<\[?)?&'(?P<rvid>\d+)rv ").unwrap();
     for line in io::BufReader::new(file).lines() {
         let line = line?;
         if let Some(caps) = fn_sig.captures(&line) {
