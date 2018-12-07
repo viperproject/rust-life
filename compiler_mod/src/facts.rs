@@ -309,6 +309,29 @@ impl FactLoader {
         let facts = load_facts::<(String, String), _>(&mut self.interner, facts_dir, "invalidates");
         self.facts.invalidates.extend(facts);
     }
+    pub fn load_expl_facts(&mut self, facts_dir: &Path) {
+
+        let facts = load_facts::<(String, String, String), _>(&mut self.interner, facts_dir, "borrow_region");
+        self.facts.borrow_region.extend(facts);
+
+        let facts = load_facts::<String, Region>(&mut self.interner, facts_dir, "universal_region");
+        self.facts.universal_region.extend(facts);
+
+        let facts = load_facts::<(String, String), _>(&mut self.interner, facts_dir, "cfg_edge");
+        self.facts.cfg_edge.extend(facts);
+
+        let facts = load_facts::<(String, String), _>(&mut self.interner, facts_dir, "killed");
+        self.facts.killed.extend(facts);
+
+        let facts = load_facts::<(String, String, String), _>(&mut self.interner, facts_dir, "expl_outlives");
+        self.facts.outlives.extend(facts);
+
+        let facts = load_facts::<(String, String), _>(&mut self.interner, facts_dir, "region_live_at");
+        self.facts.region_live_at.extend(facts);
+
+        let facts = load_facts::<(String, String), _>(&mut self.interner, facts_dir, "invalidates");
+        self.facts.invalidates.extend(facts);
+    }
 }
 
 fn load_facts<F: DeserializeOwned, T>(interner: &mut Interner, facts_dir: &Path, facts_type: &str) -> Vec<T>

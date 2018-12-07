@@ -423,6 +423,12 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("outlive_graph.dot");
         let mut outlive_graph = File::create(expl_graph_path).expect("Unable to create file");
+
+        let expl_out_path = PathBuf::from("nll-facts")
+            .join(self.def_path.to_filename_friendly_no_crate())
+            .join("expl_outlives.facts");
+        let mut expl_outlive = File::create(expl_out_path).expect("Unable to create file");
+
         writeln!(outlive_graph, "digraph G {{");
 
         let mut expl_output = ExplOutput::new();
@@ -478,8 +484,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
         }
+        //println!("test: {:?}", expl_output.expl_outlives);
 
         let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
+        let mut outlives_debug = Vec::new();
         outlives_at = FxHashMap::default();
         for (point, region_map) in expl_output.expl_outlives {
             //println!("test: {:?}", point);
@@ -487,12 +495,26 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 for region2 in regions {
                     //println!("{:?} -> {:?} [LABEL=\"{:?}\"]", region, region2, point);
                     outlives_at.entry((region, region2)).or_insert(Vec::new()).push(point);
+                    outlives_debug.push((region,region2,point));
                 }
             }
         }
-        //println!("test: {}", outlives_at);
 
-        let file_name = rustc_driver::driver::source_name(self.state.input).to_string();
+        //println!("test: {:?}", outlives_debug);
+
+
+        //let file_name = rustc_driver::driver::source_name(self.state.input).to_string();
+
+        let mut debug_facts = self.borrowck_in_facts.clone();
+        //println!("{:?}", debug_facts.outlives);
+
+        debug_facts.outlives = outlives_debug;
+
+        let output = Output::compute(&debug_facts, Algorithm::Naive, false);
+
+        println!("debug_errors: {:?}", output.errors);
+
+
 
 
 
@@ -510,7 +532,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         }
 
-        //println!("{:?}",regions_done);
+
+
+
+
+
 
         let mut i = 0;
 
@@ -575,6 +601,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 }
             }
             let mut points_sort = points.clone();
+            //println!("points {:?}: {:?}", i, points_sort);
             let mut ind = usize::max_value();
             //let mut point_x = self.interner.get_point(points_sort[0]);
             //println!("unsirted: {:?}",points_sort);
@@ -594,7 +621,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 if point_line < ind {
                     ind = point_line;
                     point_ln = self.tcx.sess.codemap().lookup_line(point_span.lo()).unwrap();
-                    point_snip = point_ln.fm.get_line(point_ln.line).unwrap().to_string();
+                    point_snip = point_ln.fm.get_line(point_line).unwrap().to_string();
                 }
 
             }
