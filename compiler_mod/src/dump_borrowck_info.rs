@@ -601,7 +601,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 }
             }
             let mut points_sort = points.clone();
-            //println!("points {:?}: {:?}", i, points_sort);
+            println!("points {:?}: {:?}", i, points_sort);
             let mut ind = usize::max_value();
             //let mut point_x = self.interner.get_point(points_sort[0]);
             //println!("unsirted: {:?}",points_sort);
