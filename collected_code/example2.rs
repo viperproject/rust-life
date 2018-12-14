@@ -1,25 +1,23 @@
 #![feature(nll)]
 
-#[derive(Debug)]
-struct B<'a> {
-    b: &'a i32
+struct A<'a>
+{
+    x: &'a u32
 }
 
-#[derive(Debug)]
-struct A<'a> {
-    one: B<'a>
-}
+impl<'a> A<'a>
+{
+    fn foo(&'a mut self)
+    {
 
-impl<'a> A<'a> {
-    fn new() -> A<'a> {
-        // let mut b = 10i32;
-        A {
-            one: B{b: &mut 10i32}
-        }
     }
+
+
 }
+
 
 fn main() {
-    let a = A::new();
-    println!("A -> {:?}", a);
+    let mut a: A=A{x:&5};
+    a.foo();
+    let x = &mut a;
 }

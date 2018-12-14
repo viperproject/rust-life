@@ -1,13 +1,17 @@
 #![feature(nll)]
 
+fn foo<'a>() -> Vec<&'a i32> {
+  let mut x = 22;
+  let mut y = 42;
+  let mut v = vec![];
+  let p = &x;
+  let q = &y;
+  v.push(p);
+  v.push(q);
+  x += 1;
+  v
+}
+
 fn main() {
-    let mut x = 4;
-    let mut y = 7;
-    let z = foo(&x,&y);
-    x = 5;
-    take(z);
+    let a = foo();
 }
-fn foo<'a,'b,'c>(x:&'a i32, y:&'b i32)-> &'c i32 where 'a:'b, 'b:'c{
-    x
-}
-fn take<T>(p: T) { unimplemented!() }

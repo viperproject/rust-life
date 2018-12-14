@@ -505,14 +505,14 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         //let file_name = rustc_driver::driver::source_name(self.state.input).to_string();
 
-        let mut debug_facts = self.borrowck_in_facts.clone();
+        //let mut debug_facts = self.borrowck_in_facts.clone();
         //println!("{:?}", debug_facts.outlives);
 
-        debug_facts.outlives = outlives_debug;
+        //debug_facts.outlives = outlives_debug;
 
-        let output = Output::compute(&debug_facts, Algorithm::Naive, false);
+        //let output = Output::compute(&debug_facts, Algorithm::Naive, false);
 
-        println!("debug_errors: {:?}", output.errors);
+        //println!("debug_errors: {:?}", output.errors);
 
 
 
@@ -601,7 +601,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 }
             }
             let mut points_sort = points.clone();
-            println!("points {:?}: {:?}", i, points_sort);
+            //println!("points {:?}: {:?}", i, points_sort);
             let mut ind = usize::max_value();
             //let mut point_x = self.interner.get_point(points_sort[0]);
             //println!("unsirted: {:?}",points_sort);
@@ -621,7 +621,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 if point_line < ind {
                     ind = point_line;
                     point_ln = self.tcx.sess.codemap().lookup_line(point_span.lo()).unwrap();
-                    point_snip = point_ln.fm.get_line(point_line).unwrap().to_string();
+                    point_snip = point_ln.fm.get_line(ind-1).unwrap().to_string();
                 }
 
             }
@@ -640,12 +640,12 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             if *eq==0 {
 
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} alive whenever {:?} is alive </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
                 writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
             }
 
             if *eq==1 {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} alive whenever {:?} is alive </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} and {:?}  may point to each other </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
                 writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
                 writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
             }
