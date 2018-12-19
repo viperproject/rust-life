@@ -424,11 +424,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             .join("outlive_graph.dot");
         let mut outlive_graph = File::create(expl_graph_path).expect("Unable to create file");
 
-        let expl_out_path = PathBuf::from("nll-facts")
-            .join(self.def_path.to_filename_friendly_no_crate())
-            .join("expl_outlives.facts");
-        let mut expl_outlive = File::create(expl_out_path).expect("Unable to create file");
-
         writeln!(outlive_graph, "digraph G {{");
 
         let mut expl_output = ExplOutput::new();
@@ -436,51 +431,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         for (point, loans) in self.borrowck_out_facts.errors.iter() {
             let err_point_ind = point;
             let err_loans = loans;
-            let err_point = self.interner.get_point(*err_point_ind);
-            let err_location = err_point.location;
-            let err_block = &self.mir[err_location.block];
-            let err_stmt = &err_block.statements[err_location.statement_index];
-            println!("error source: {:?}", err_stmt.source_info.span);
-
-
-            let mut borrow_points = Vec::new();
-            let mut regions_points = Vec::new();
-            for loan in err_loans {
-                for (point, borrows) in self.borrowck_out_facts.borrow_live_at.iter() {
-                    if borrows.contains(loan) {
-                        borrow_points.push(point);
-                    }
-                }
-
-                for (point, region_map) in self.borrowck_out_facts.restricts.iter() {
-                    for (region, borrows) in region_map.iter() {
-                        if borrows.contains(loan) && point == err_point_ind {
-                            //println!("region: {:?}", region);
-                            regions_points.push(region);
-                        }
-                    }
-                }
-            }
-            regions_points.sort();
-            for region in regions_points.iter() {
-                let region_req = *region;
-                for (local, rv) in self.variable_regions.iter() {
-                    if region_req == rv {
-                        let local_decl = &self.mir.local_decls[*local];
-                        let local_name = local_decl.name.unwrap().to_string();
-                        let local_source = local_decl.source_info.span;
-                        println!("Var: {:?}", local_name);
-                        println!("var source: {:?}", local_source);
-                    }
-                }
-            }
-            borrow_points.sort();
-            let mut borrow_point_ind = borrow_points[0];
-            let mut borrow_point = self.interner.get_point(*borrow_point_ind);
-            let mut borrow_location = borrow_point.location;
-            let mut borrow_block = &self.mir[borrow_location.block];
-            let mut borrow_stmt = &borrow_block.statements[borrow_location.statement_index];
-            println!("borrow source: {:?}", borrow_stmt.source_info.span);
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
         }
@@ -500,22 +450,13 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
         }
 
-        //println!("test: {:?}", outlives_debug);
+        let mut debug_facts = self.borrowck_in_facts.clone();
 
+        debug_facts.outlives = outlives_debug;
 
-        //let file_name = rustc_driver::driver::source_name(self.state.input).to_string();
+        let output = Output::compute(&debug_facts, Algorithm::Naive, false);
 
-        //let mut debug_facts = self.borrowck_in_facts.clone();
-        //println!("{:?}", debug_facts.outlives);
-
-        //debug_facts.outlives = outlives_debug;
-
-        //let output = Output::compute(&debug_facts, Algorithm::Naive, false);
-
-        //println!("debug_errors: {:?}", output.errors);
-
-
-
+        println!("debug_errors: {:?}", output.errors);
 
 
 
@@ -531,9 +472,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
 
         }
-
-
-
 
 
 
@@ -596,10 +534,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
                     //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
                 }
-                else{
-                    //TODO
-                }
             }
+
             let mut points_sort = points.clone();
             //println!("points {:?}: {:?}", i, points_sort);
             let mut ind = usize::max_value();
