@@ -6,7 +6,7 @@ RUN_FILE=tests/typecheck/pass/lint.rs
 STDERR_FILE=$(RUN_FILE:.rs=.stderr)
 RUN_FILE_FOLDER=$(shell dirname ${RUN_FILE})
 JAVA_HOME=/usr/lib/jvm/default-java
-RUST_VERSION=nightly-2018-06-27-x86_64-unknown-linux-gnu
+RUST_VERSION=nightly-2019-04-24-x86_64-unknown-linux-gnu
 COMPILER_PATH=$$HOME/.rustup/toolchains/${RUST_VERSION}
 LIB_PATH=${COMPILER_PATH}/lib:${JAVA_HOME}/jre/lib/amd64/server:${JAVA_HOME}/lib/server:/target/debug
 DRIVER=target/debug/extract-error
