@@ -9,32 +9,34 @@ extern crate log;
 //extern crate prusti;
 extern crate rustc;
 extern crate rustc_driver;
+extern crate rustc_interface;
 extern crate rustc_errors;
 extern crate rustc_codegen_utils;
 extern crate syntax;
 extern crate syntax_pos;
 
-mod driver_utils;
+//mod driver_utils;
 mod dump_borrowck_info;
 mod facts;
 mod regions;
 
-use rustc::session;
-use rustc_driver::{driver, Compilation, CompilerCalls, RustcDefaultCalls};
-use rustc_codegen_utils::codegen_backend::CodegenBackend;
-use std::env::{var, set_var};
-use std::path::PathBuf;
+//use rustc::session;
+//use rustc_driver::{driver, Compilation, CompilerCalls, RustcDefaultCalls};
+//use rustc_codegen_utils::codegen_backend::CodegenBackend;
+use std::env::{/*var,*/ set_var};
+//use std::path::PathBuf;
 //use std::rc::Rc;
 //use std::cell::Cell;
-use syntax::ast;
-use syntax::feature_gate::AttributeType;
+//use syntax::ast;
+//use syntax::feature_gate::AttributeType;
 //use prusti_interface::constants::PRUSTI_SPEC_ATTR;
-use driver_utils::run;
+//use driver_utils::run;
 use rustc::hir::def_id::DefId;
+use rustc_interface::interface;
 
 pub type ProcedureDefId = DefId;
 
-struct PrustiCompilerCalls {
+/*struct PrustiCompilerCalls {
     default: Box<RustcDefaultCalls>,
 }
 
@@ -80,11 +82,12 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
         odir: &Option<PathBuf>,
         ofile: &Option<PathBuf>,
     ) -> Compilation {
+        /*
         if Ok(String::from("true")) == var("PRUSTI_TEST") {
             if let rustc::session::config::Input::File(ref path) = input {
                 set_var("PRUSTI_TEST_FILE", path.to_str().unwrap());
             }
-        }
+        }*/
         self.default
             .late_callback(trans, matches, sess, crate_stores, input, odir, ofile)
     }
@@ -100,6 +103,7 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
         /*let specifications = Rc::new(Cell::new(None));
         let put_specifications = Rc::clone(&specifications);
         let get_specifications = Rc::clone(&specifications);*/
+        /*
         control.after_parse.callback = Box::new(move |state| {
             trace!("[after_parse.callback] enter");
             {
@@ -131,6 +135,7 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
             trace!("[after_parse.callback] exit");
             old(state);
         });
+        */
         let old = std::mem::replace(&mut control.after_analysis.callback, box |_| {});
         control.after_analysis.callback = Box::new(move |state| {
             trace!("[after_analysis.callback] enter");
@@ -147,6 +152,35 @@ impl<'a> CompilerCalls<'a> for PrustiCompilerCalls {
         control
     }
 }
+*/
+
+/// Struct holding the compiler callbacks for rust-life.
+/// Could be used to store state for callbacks, but is not done for now.
+struct RustLifeCallbacks {}
+
+impl RustLifeCallbacks {
+    /// Function that creates a RustLifeCallback.
+    fn new() -> RustLifeCallbacks {
+        RustLifeCallbacks { }
+    }
+}
+
+impl rustc_driver::Callbacks for RustLifeCallbacks {
+    fn after_analysis(&mut self, compiler: &interface::Compiler) -> bool {
+        trace!("[RustLifeCallbacks.after_analysis] enter");
+
+        // Get the session. (Is passign this session the right thing to do?)
+        let sess = compiler.session();
+
+        // TODO pass correct args.
+        dump_borrowck_info::dump_borrowck_info(sess, compiler.tcx.unwrap());
+
+        trace!("[RustLifeCallbacks.after_analysis] exit");
+
+        // Stop after analysis and after extracting the information from the borrow checker:
+        false
+    }
+}
 
 pub fn main() {
     env_logger::init();
@@ -160,8 +194,12 @@ pub fn main() {
     args.push("-Zidentify-regions".to_owned());
     args.push("-Zdump-mir=all".to_owned());
     args.push("-Zdump-mir-dir=log/mir/".to_owned());
-    let prusti_compiler_calls = Box::new(PrustiCompilerCalls::new());
-    let exit_status = run(move || rustc_driver::run_compiler(&args, prusti_compiler_calls, None, None));
+    //let prusti_compiler_calls = Box::new(PrustiCompilerCalls::new());
+    //let exit_status = run(move || rustc_driver::run_compiler(&args, prusti_compiler_calls, None, None));
+    let result = rustc_driver::report_ices_to_stderr_if_any(move || {
+        rustc_driver::run_compiler(&args, &mut RustLifeCallbacks::new(), None, None)
+    }).and_then(|result| result);
+
     trace!("[main] exit");
-    std::process::exit(exit_status as i32);
+    std::process::exit(result.is_err() as i32);
 }
