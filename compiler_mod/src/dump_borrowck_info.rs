@@ -36,7 +36,7 @@ use self::datafrog::Relation;
 pub fn dump_borrowck_info<'a, 'tcx>(state: &rustc_driver::driver::CompileState<'a, 'tcx>, tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
 
-    assert!(tcx.use_mir_borrowck(), "NLL is not enabled.");
+    assert!(tcx.use_mir_borrowck(), "NLL is not enabled."); // maybe use borrowck_mode(&self) -> BorrowckMode instead?
 
     let mut printer = InfoPrinter {
         tcx: tcx,

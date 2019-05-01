@@ -173,7 +173,12 @@ impl rustc_driver::Callbacks for RustLifeCallbacks {
         let sess = compiler.session();
 
         // TODO pass correct args.
-        dump_borrowck_info::dump_borrowck_info(sess, compiler.tcx.unwrap());
+        compiler
+            .global_ctxt()
+            .unwrap()
+            .peek_mut()
+            .enter(|tcx| dump_borrowck_info::dump_borrowck_info(sess, tcx));
+                // Ev. change the called function to take tcx by reference?
 
         trace!("[RustLifeCallbacks.after_analysis] exit");
 
