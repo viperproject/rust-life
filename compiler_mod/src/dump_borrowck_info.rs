@@ -223,7 +223,9 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
         expl_error.insert(Relation::from(expl_error_vec.iter().flat_map(
             |(point, loans)| loans.iter().map(move |&loan|  (loan, *point))
-        )));
+        ).collect()));
+        // Or should we instead use collect_vec to get the right "thing"/type?
+        //   --> probably not, trying to do so leads to a VERY drastic error stating that collect_vec is not found!
 
         outlives.insert(all_facts.outlives.clone().into());
         requires.insert(all_facts.borrow_region.clone().into());
