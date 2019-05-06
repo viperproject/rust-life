@@ -33,14 +33,13 @@ use self::datafrog::Relation;
 
 
 
-pub fn dump_borrowck_info<'a, 'tcx>(state: &rustc_driver::driver::CompileState<'a, 'tcx>, tcx: TyCtxt<'a, 'tcx, 'tcx>) {
+pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
 
-    assert!(tcx.use_mir_borrowck(), "NLL is not enabled."); // maybe use borrowck_mode(&self) -> BorrowckMode instead?
+    //assert!(tcx.use_mir_borrowck(), "NLL is not enabled."); // maybe use borrowck_mode(&self) -> BorrowckMode instead?
 
     let mut printer = InfoPrinter {
         tcx: tcx,
-        state: state,
     };
     intravisit::walk_crate(&mut printer, tcx.hir.krate());
 
@@ -49,7 +48,6 @@ pub fn dump_borrowck_info<'a, 'tcx>(state: &rustc_driver::driver::CompileState<'
 
 struct InfoPrinter<'a, 'tcx: 'a> {
     pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
-    pub state: &'a rustc_driver::driver::CompileState<'a, 'tcx>,
 }
 
 impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
@@ -118,7 +116,6 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
             interner: interner,
 			variable_regions: variable_regions,
             def_path: def_path,
-            state: self.state,
         };
         mir_info_printer.print_info();
 
@@ -408,7 +405,6 @@ struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub interner: facts::Interner,
 	pub variable_regions: HashMap<mir::Local, facts::Region>,
     pub def_path: rustc::hir::map::DefPath,
-    pub state: &'a rustc_driver::driver::CompileState<'a, 'tcx>,
 }
 
 

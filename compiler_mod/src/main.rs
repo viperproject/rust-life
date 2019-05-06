@@ -177,7 +177,7 @@ impl rustc_driver::Callbacks for RustLifeCallbacks {
             .global_ctxt()
             .unwrap()
             .peek_mut()
-            .enter(|tcx| dump_borrowck_info::dump_borrowck_info(sess, tcx));
+            .enter(|tcx| dump_borrowck_info::dump_borrowck_info(tcx));
                 // Ev. change the called function to take tcx by reference?
 
         trace!("[RustLifeCallbacks.after_analysis] exit");
