@@ -27,7 +27,6 @@ use rustc::ty::TyCtxt;
 use self::rustc_data_structures::indexed_vec::Idx;
 use self::rustc_data_structures::fx::FxHashMap;
 use syntax::ast;
-use syntax::codemap::Span;
 use syntax_pos::symbol::Symbol;
 use self::datafrog::Relation;
 
@@ -41,7 +40,7 @@ pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     let mut printer = InfoPrinter {
         tcx: tcx,
     };
-    intravisit::walk_crate(&mut printer, tcx.hir.krate());
+    intravisit::walk_crate(&mut printer, tcx.hir().krate());
 
     trace!("[dump_borrowck_info] exit");
 }
@@ -52,12 +51,12 @@ struct InfoPrinter<'a, 'tcx: 'a> {
 
 impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
     fn nested_visit_map<'this>(&'this mut self) -> intravisit::NestedVisitorMap<'this, 'tcx> {
-        let map = &self.tcx.hir;
+        let map = &self.tcx.hir();
         intravisit::NestedVisitorMap::All(map)
     }
 
     fn visit_fn(&mut self, fk: intravisit::FnKind<'tcx>, _fd: &'tcx hir::FnDecl,
-                _b: hir::BodyId, _s: Span, node_id: ast::NodeId) {
+                _b: hir::BodyId, _s: syntax_pos::Span, hir_id: hir::HirId) {
         let name = match fk {
             intravisit::FnKind::ItemFn(name, ..) => name,
             _ => return,
@@ -67,18 +66,18 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 
         match env::var_os("PRUSTI_DUMP_PROC").and_then(|value| value.into_string().ok()) {
             Some(value) => {
-                if name != value {
+                if name.as_str() != value {
                     return;
                 }
             },
             _ => {},
         };
 
-        let def_id = self.tcx.hir.local_def_id(node_id);
+        let def_id = self.tcx.hir().local_def_id_from_hir_id(hir_id);
         self.tcx.mir_borrowck(def_id);
 
         // Read Polonius facts.
-        let def_path = self.tcx.hir.def_path(def_id);
+        let def_path = self.tcx.hir().def_path(def_id);
         let dir_path = PathBuf::from("nll-facts").join(def_path.to_filename_friendly_no_crate());
         debug!("Reading facts from: {:?}", dir_path);
         let mut facts_loader = facts::FactLoader::new();
