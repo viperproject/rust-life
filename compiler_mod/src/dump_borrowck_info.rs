@@ -31,7 +31,6 @@ use syntax_pos::symbol::Symbol;
 use self::datafrog::Relation;
 
 
-
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
 
@@ -221,7 +220,7 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
         let expl_error_vec = vec![error_fact];
 
-        expl_error.insert(Relation::from(expl_error_vec.iter().flat_map(
+        expl_error.insert(Relation::from_vec(expl_error_vec.iter().flat_map(
             |(point, loans)| loans.iter().map(move |&loan|  (loan, *point))
         ).collect()));
         // Or should we instead use collect_vec to get the right "thing"/type?
@@ -229,40 +228,40 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
         outlives.insert(all_facts.outlives.clone().into());
         requires.insert(all_facts.borrow_region.clone().into());
-        region_live_at.insert(Relation::from(
-            all_facts.region_live_at.iter().map(|&(r, p)| ((r, p), ())),
+        region_live_at.insert(Relation::from_vec(
+            all_facts.region_live_at.iter().map(|&(r, p)| ((r, p), ())).collect(),
         ));
-        invalidates.insert(Relation::from(
-            all_facts.invalidates.iter().map(|&(p, b)| ((b, p), ())),
+        invalidates.insert(Relation::from_vec(
+            all_facts.invalidates.iter().map(|&(p, b)| ((b, p), ())).collect(),
         ));
         cfg_edge_p.insert(all_facts.cfg_edge.clone().into());
 
-        subset.insert(Relation::from(
+        subset.insert(Relation::from_vec(
             output.subset.iter().flat_map(
                 |(&point, region_map)|
                     region_map.iter().flat_map(
                         move |(&region, regions)|
                             regions.iter().map(move |&region2| (region, region2, point))
                     )
-            )
+            ).collect()
         ));
 
-        borrow_live_at.insert(Relation::from(
+        borrow_live_at.insert(Relation::from_vec(
             output.borrow_live_at.iter().flat_map(
                 |(&point, loans)|
                     loans.iter().map(move |&loan| (loan, point))
 
-            )
+            ).collect()
         ));
 
-        requires.insert(Relation::from(
+        requires.insert(Relation::from_vec(
             output.restricts.iter().flat_map(
                 |(&point, region_map)|
                     region_map.iter().flat_map(
                         move |(&region, loans)|
                             loans.iter().map(move |&loan| (region, loan, point))
                     )
-            )
+            ).collect()
         ));
 
         while iteration.changed() {
