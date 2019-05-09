@@ -512,8 +512,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                         }
                     }
 
-                    fm_ln1 = self.tcx.sess.codemap().lookup_line(local_source1.lo()).unwrap();
-                    local_source1_snip = fm_ln1.fm.get_line(fm_ln1.line).unwrap().to_string();
+                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
+                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
                     //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
                     //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
                 }
@@ -525,8 +525,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                         local_name2 = ("anonymous Variable").to_string();
                     }
                     local_source2 = local_decl.source_info.span;
-                    fm_ln2 = self.tcx.sess.codemap().lookup_line(local_source2.lo()).unwrap();
-                    local_source2_snip = fm_ln2.fm.get_line(fm_ln2.line).unwrap().to_string();
+                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
+                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
                     //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
                     //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
                 }
@@ -549,11 +549,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     let stmt_x = &point_block.statements[point_location.statement_index];
                     point_span = stmt_x.source_info.span;
                 }
-                let point_line = self.tcx.sess.codemap().lookup_char_pos_adj(point_span.lo()).line;
+                let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
                 if point_line < ind {
                     ind = point_line;
-                    point_ln = self.tcx.sess.codemap().lookup_line(point_span.lo()).unwrap();
-                    point_snip = point_ln.fm.get_line(ind-1).unwrap().to_string();
+                    point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
+                    point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
                 }
 
             }
