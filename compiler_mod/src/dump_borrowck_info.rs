@@ -500,8 +500,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                         for block_data in self.mir.basic_blocks().iter(){
                             for stmt in block_data.statements.iter(){
                                 if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                    match l {
-                                        mir::Place::Local(v) => if v==local_x{
+                                    match l.local() {
+                                        Some(v) => if v==*local_x{
                                             local_source1 = stmt.source_info.span;
                                         }
 
