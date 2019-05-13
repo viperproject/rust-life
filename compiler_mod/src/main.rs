@@ -166,11 +166,8 @@ impl RustLifeCallbacks {
 }
 
 impl rustc_driver::Callbacks for RustLifeCallbacks {
-    fn after_analysis(&mut self, compiler: &interface::Compiler) -> bool {
-        trace!("[RustLifeCallbacks.after_analysis] enter");
-
-        // Get the session. (Is passign this session the right thing to do?)
-        let sess = compiler.session();
+    fn after_parsing(&mut self, compiler: &interface::Compiler) -> bool {
+        trace!("[RustLifeCallbacks.after_parsing] enter");
 
         // TODO pass correct args.
         compiler
@@ -178,13 +175,31 @@ impl rustc_driver::Callbacks for RustLifeCallbacks {
             .unwrap()
             .peek_mut()
             .enter(|tcx| dump_borrowck_info::dump_borrowck_info(tcx));
-                // Ev. change the called function to take tcx by reference?
+        // Ev. change the called function to take tcx by reference?
 
-        trace!("[RustLifeCallbacks.after_analysis] exit");
-
-        // Stop after analysis and after extracting the information from the borrow checker:
+        // Stop!
         false
     }
+
+//    fn after_analysis(&mut self, compiler: &interface::Compiler) -> bool {
+//        trace!("[RustLifeCallbacks.after_analysis] enter");
+//
+//        // Get the session. (Is passign this session the right thing to do?)
+//        let sess = compiler.session();
+//
+//        // TODO pass correct args.
+//        compiler
+//            .global_ctxt()
+//            .unwrap()
+//            .peek_mut()
+//            .enter(|tcx| dump_borrowck_info::dump_borrowck_info(tcx));
+//                // Ev. change the called function to take tcx by reference?
+//
+//        trace!("[RustLifeCallbacks.after_analysis] exit");
+//
+//        // Stop after analysis and after extracting the information from the borrow checker:
+//        false
+//    }
 }
 
 pub fn main() {
