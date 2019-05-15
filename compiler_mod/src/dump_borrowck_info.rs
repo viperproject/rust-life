@@ -4,11 +4,8 @@ extern crate datafrog;
 pub extern crate polonius_engine;
 pub extern crate regex;
 pub extern crate rustc;
-pub extern crate rustc_driver;
-pub extern crate rustc_mir;
 pub extern crate rustc_data_structures;
 pub extern crate serde;
-pub extern crate syntax;
 pub extern crate syntax_pos;
 
 use super::facts;
@@ -24,10 +21,7 @@ use self::polonius_engine::{Algorithm, Output};
 use rustc::hir::{self, intravisit};
 use rustc::mir;
 use rustc::ty::TyCtxt;
-use self::rustc_data_structures::indexed_vec::Idx;
 use self::rustc_data_structures::fx::FxHashMap;
-use syntax::ast;
-use syntax_pos::symbol::Symbol;
 use self::datafrog::Relation;
 
 
