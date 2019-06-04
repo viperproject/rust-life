@@ -23,6 +23,8 @@ use rustc::mir;
 use rustc::ty::TyCtxt;
 use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
+use self::regex::Regex;
+use facts::PointType;
 
 
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
@@ -388,6 +390,62 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
 }
 
+fn compute_error_path(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (facts::PointIndex, Vec<facts::Loan>)){
+    trace!("[compute_error_path] enter");
+    use self::facts::{PointIndex as Point, Loan, Region};
+
+    let regions_life_at_error : Vec<Region> = all_facts.region_live_at.iter().filter(|&(r, p)|
+        *p == error_fact.0
+    ).map(|&(r, p)| r).collect();
+
+    debug!("regions_life_at_error: {:?}", regions_life_at_error);
+
+    //NOTE It might be possible to simplify this, making the next step superfluous, as we already get a loan form the error in error_fact.
+
+    let loans_invalidated_by_error : Vec<Loan> = all_facts.invalidates.iter().filter(|&(p, l)|
+        *p == error_fact.0
+    ).map(|&(p, l)| l).collect();
+
+    debug!("loans_invalidated_by_error: {:?}", loans_invalidated_by_error);
+
+    let mut requires = all_facts.borrow_region.clone();
+
+    debug!("requires, only elements from all_facts.borrow_region : {:?}", requires);
+
+    requires.extend(
+        output.restricts.iter().flat_map(
+            |(&point, region_map)|
+                region_map.iter().flat_map(
+                    move |(&region, loans)|
+                        loans.iter().map(move |&loan| (region, loan, point))
+                )
+        )
+    );
+
+    debug!("requires, after adding elements from output.restricts : {:?}", requires);
+
+    let error_region : Region = requires.iter().filter(|&(r, l, p)|
+        *p == error_fact.0 &&
+         loans_invalidated_by_error.contains(l) &&
+         regions_life_at_error.contains(r)
+    ).map(|&(r, l, p)| r).collect::<Vec<_>>()[0];
+
+    debug!("error_region: {:?}", error_region);
+
+    // NOTE this (net two lines) is only for testing of points_of_region, and probably not really needed.
+    let points_live_at_error_region = points_of_region(all_facts, error_region);
+
+    debug!("points_live_at_error_region: {:?}", points_live_at_error_region);
+
+    trace!("[compute_error_path] exit");
+}
+
+fn points_of_region(all_facts: &facts::AllInputFacts, region: facts::Region) -> Vec<facts::PointIndex> {
+    all_facts.region_live_at.iter().filter(|&(r, p)|
+        *r == region
+    ).map(|&(r, p)| p).collect()
+}
+
 
 
 
@@ -423,6 +481,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let err_loans = loans;
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
+            compute_error_path(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
         }
         //println!("test: {:?}", expl_output.expl_outlives);
 
