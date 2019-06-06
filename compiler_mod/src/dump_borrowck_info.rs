@@ -399,6 +399,7 @@ struct ErrorPathFinder<'epf> {
     output: &'epf facts::AllOutputFacts,
     error_fact: (facts::PointIndex, Vec<facts::Loan>),
     outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>,
+    start_points_of_error_loan: Vec<facts::PointIndex>,
 }
 
 impl <'epf> ErrorPathFinder<'epf> {
@@ -408,11 +409,12 @@ impl <'epf> ErrorPathFinder<'epf> {
             all_facts,
             output,
             error_fact,
-            outlives
+            outlives,
+            start_points_of_error_loan: Vec::default(),
         }
     }
 
-    fn compute_error_path(&self) {
+    fn compute_error_path(&mut self) {
         trace!("[compute_error_path] enter");
         use self::facts::{PointIndex as Point, Loan, Region};
 
@@ -476,9 +478,9 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("start_points_of_error_region: {:?}", start_points_of_error_region);
 
-        let start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
+        self.start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
 
-        debug!("start_points_of_error_loan: {:?}", start_points_of_error_loan);
+        debug!("start_points_of_error_loan: {:?}", self.start_points_of_error_loan);
 
         let mut path_to_error: Vec<Region> = Vec::new();
         self.path_to_error_backwards(error_region,&mut path_to_error);
@@ -571,15 +573,24 @@ impl <'epf> ErrorPathFinder<'epf> {
     fn path_to_error_backwards(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
                                -> bool {
         let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
         debug!("cur_region (start): {:?}", start);
         debug!("points_of_cur_region: {:?}", points_of_cur_region);
-        if !cur_path.is_empty() && self.has_bigger_point(&points_of_cur_region, self.error_fact.0) {
-            // end of recursion
-            cur_path.push(start);
-            return true;
-        }
+        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
+
         // add start to the path, as it will now become part of it.
         cur_path.push(start);
+
+        for sp in start_points_of_cur_region {
+            if self.start_points_of_error_loan.contains(&sp) {
+                // this region's start intersects with the start of the loan that causes the error,
+                // therefore we consider here to be the end of the relevant path, and therefore stop
+                // (end recursion) and return success (true)
+                return true
+            }
+        }
+
+
         let prev_regions = self.find_prev_regions(start);
         debug!("prev_regions: {:?}", prev_regions);
 
@@ -598,8 +609,8 @@ impl <'epf> ErrorPathFinder<'epf> {
                 }
             }
         }
-        // There is no more previous region to inspect, and apparently none did lead to a path that leads to "success", so this is probably a dead end, return false.
-        false // setting this to true would cause the result for find_path_in_graph_ex0.rs to be more correct, but I think that doing so is not really "correct" in the sense of what the intention was.
+        // There are no more previous regions to inspect, and apparently none did lead to a path that leads to "success", so this is a dead end, return false.
+        false
     }
 }
 
@@ -636,10 +647,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
 
-            let error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
+            let mut error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
                                                          &self.borrowck_out_facts,
                                                          (*err_point_ind, err_loans.clone()),
-                                                         &expl_output.unordered_expl_outlives);
+                                                         &expl_output.unordered_expl_outlives); // (probably) could also use &self.borrowck_in_facts.outlives
+                                                                                            // (not really tested, but looks like working, but maybe not always deterministic.)
             error_path_finder.compute_error_path();
         }
         //println!("test: {:?}", expl_output.expl_outlives);
