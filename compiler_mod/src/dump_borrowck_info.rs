@@ -591,7 +591,8 @@ impl <'epf> ErrorPathFinder<'epf> {
         }
 
 
-        let prev_regions = self.find_prev_regions(start);
+        let mut prev_regions = self.find_prev_regions(start);
+        prev_regions.dedup();
         debug!("prev_regions: {:?}", prev_regions);
 
         for pr in prev_regions {
