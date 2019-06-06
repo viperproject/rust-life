@@ -394,155 +394,214 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
 }
 
-fn compute_error_path(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts,
-                      error_fact: (facts::PointIndex, Vec<facts::Loan>),
-                      unordered_expl_outlives: &Vec<(facts::Region, facts::Region, facts::PointIndex)>){
-    trace!("[compute_error_path] enter");
-    use self::facts::{PointIndex as Point, Loan, Region};
-
-    let regions_life_at_error : Vec<Region> = all_facts.region_live_at.iter().filter(|&(r, p)|
-        *p == error_fact.0
-    ).map(|&(r, p)| r).collect();
-
-    debug!("regions_life_at_error: {:?}", regions_life_at_error);
-
-    //NOTE It might be possible to simplify this, making the next step superfluous, as we already get a loan form the error in error_fact.
-
-    let loans_invalidated_by_error : Vec<Loan> = all_facts.invalidates.iter().filter(|&(p, l)|
-        *p == error_fact.0
-    ).map(|&(p, l)| l).collect();
-
-    debug!("loans_invalidated_by_error: {:?}", loans_invalidated_by_error);
-
-    let mut requires = all_facts.borrow_region.clone();
-
-    debug!("requires, only elements from all_facts.borrow_region : {:?}", requires);
-
-    requires.extend(
-        output.restricts.iter().flat_map(
-            |(&point, region_map)|
-                region_map.iter().flat_map(
-                    move |(&region, loans)|
-                        loans.iter().map(move |&loan| (region, loan, point))
-                )
-        )
-    );
-
-    debug!("requires, after adding elements from output.restricts : {:?}", requires);
-
-    let error_region : Region = requires.iter().filter(|&(r, l, p)|
-        *p == error_fact.0 &&
-         loans_invalidated_by_error.contains(l) &&
-         regions_life_at_error.contains(r)
-    ).map(|&(r, l, p)| r).collect::<Vec<_>>()[0];
-
-    debug!("error_region: {:?}", error_region);
-    debug!("error_point: {:?}", error_fact.0);
-    debug!("all_facts.region_live_at: {:?}", all_facts.region_live_at);
-    debug!("all_facts.cfg_edge: {:?}", all_facts.cfg_edge);
-
-    debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", is_later_in_program_or_eq(facts::PointIndex::from(22), facts::PointIndex::from(22), all_facts));
-
-    // NOTE this (net two lines) is only for testing of points_of_region, and probably not really needed.
-    let points_live_at_error_region = points_of_region(all_facts, error_region);
-
-    debug!("points_live_at_error_region: {:?}", points_live_at_error_region);
-
-    let mut path_to_error: Vec<Region> = Vec::new();
-    path_to_error_backwards(error_region, error_fact.0, &mut path_to_error, all_facts, unordered_expl_outlives);
-
-    debug!("path_to_error after done with iteration: {:?}", path_to_error);
-
-    trace!("[compute_error_path] exit");
+struct ErrorPathFinder<'epf> {
+    all_facts: &'epf facts::AllInputFacts,
+    output: &'epf facts::AllOutputFacts,
+    error_fact: (facts::PointIndex, Vec<facts::Loan>),
+    outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>,
 }
 
-fn points_of_region(all_facts: &facts::AllInputFacts, region: facts::Region) -> Vec<facts::PointIndex> {
-    all_facts.region_live_at.iter().filter(|&(r, p)|
-        *r == region
-    ).map(|&(r, p)| p).collect()
-}
-
-/// finds all regions in (unordered_)expl_outlives that are directly following the region given as start.
-fn find_next_regions(start: facts::Region, unordered_expl_outlives: &Vec<(facts::Region, facts::Region, facts::PointIndex)>)
-    -> Vec<facts::Region> {
-    unordered_expl_outlives.iter().filter(|&(r1, r2, _)|
-        *r1 == start
-    ).map(|&(_, r2, _)| r2).collect()
-}
-
-/// finds all regions in (unordered_)expl_outlives that are directly before the region given as start.
-fn find_prev_regions(start: facts::Region, unordered_expl_outlives: &Vec<(facts::Region, facts::Region, facts::PointIndex)>)
-                     -> Vec<facts::Region> {
-    unordered_expl_outlives.iter().filter(|&(_, r2, _)|
-        *r2 == start
-    ).map(|&(r1, _, _)| r1).collect()
-}
-
-/// Returns true if there is a point P in points such that this point P is bigger then cmp
-/// (where bigger means that it is later in the program flow then then previous one)
-/// NOTE: For now, points are simply compared by their index
-fn has_bigger_point(points: &Vec<facts::PointIndex>, cmp: facts::PointIndex, all_facts: &facts::AllInputFacts) -> bool {
-    points.iter().filter(|&p|
-        is_later_in_program_or_eq(*p, cmp, all_facts)
-    ).count() > 0
-}
-
-/// check if goal is later in the cfg then start, or at the same point
-fn is_later_in_program_or_eq(goal: facts::PointIndex, start: facts::PointIndex, all_facts: &facts::AllInputFacts) -> bool {
-    goal == start ||
-        all_facts.cfg_edge.iter().filter(|&(p, q)|
-            *p == start && *q == goal
-        ).count() > 0 ||
-            all_facts.cfg_edge.iter().filter(|&(p, q)|
-                *p == start && is_later_in_program_or_eq(goal, *q, all_facts)
-            ).count() > 0
-}
-
-/// Returns true if there is a point P in points such that this point P is smaller then cmp
-/// (where smaller means that it is earlier in the program flow then then previous one)
-/// NOTE: For now, points are simply compared by their index
-fn has_smaller_point(points: &Vec<facts::PointIndex>, cmp: facts::PointIndex) -> bool {
-    // TODO does (presumably) simply compare points by their index, as usize. No idea if this makes any sense or is any good.
-    points.iter().filter(|&p| *p < cmp).count() > 0
-}
-
-fn path_to_error_backwards(start: facts::Region, error_point: facts::PointIndex, mut cur_path: &mut Vec<facts::Region>,
-                           all_facts: &facts::AllInputFacts,
-                           unordered_expl_outlives: &Vec<(facts::Region, facts::Region, facts::PointIndex)>)
-                           -> bool {
-    let points_of_cur_region: Vec<facts::PointIndex> = points_of_region(all_facts, start);
-    debug!("cur_region (start): {:?}", start);
-    debug!("points_of_cur_region: {:?}", points_of_cur_region);
-    if ! cur_path.is_empty() && has_bigger_point(&points_of_cur_region, error_point, all_facts) {
-        // end of recursion
-        cur_path.push(start);
-        return true;
-    }
-    // add start to the path, as it will now become part of it.
-    cur_path.push(start);
-    let prev_regions = find_prev_regions(start, unordered_expl_outlives);
-    debug!("prev_regions: {:?}", prev_regions);
-
-    for pr in prev_regions {
-        if cur_path.contains(&pr) {
-            // this element already is part of the path, so there would be circle by adding it again, therefore stop here.
-            continue
-        } else {
-            let mut pr_path = cur_path.clone();
-            if path_to_error_backwards(pr, error_point, &mut pr_path, all_facts, unordered_expl_outlives) {
-                cur_path.clear();
-                cur_path.append(&mut pr_path);
-                return true
-            } else {
-                continue
-            }
-
+impl <'epf> ErrorPathFinder<'epf> {
+    fn new(all_facts: &'epf facts::AllInputFacts, output: &'epf facts::AllOutputFacts,
+           error_fact: (facts::PointIndex, Vec<facts::Loan>), outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>) -> Self {
+        ErrorPathFinder {
+            all_facts,
+            output,
+            error_fact,
+            outlives
         }
     }
-    // There is no more previous region to inspect, and apparently none did lead to a path that leads to "success", so this is probably a dead end, return false.
-    false // setting this to true would cause the result for find_path_in_graph_ex0.rs to be more correct, but I think that doing so is not really "correct" in the sense of what the intention was.
-}
 
+    fn compute_error_path(&self) {
+        trace!("[compute_error_path] enter");
+        use self::facts::{PointIndex as Point, Loan, Region};
+
+        let regions_life_at_error: Vec<Region> = self.all_facts.region_live_at.iter().filter(|&(r, p)|
+            *p == self.error_fact.0
+        ).map(|&(r, p)| r).collect();
+
+        debug!("regions_life_at_error: {:?}", regions_life_at_error);
+
+        //NOTE It might be possible to simplify this, making the next step superfluous, as we already get a loan form the error in error_fact.
+
+        let loans_invalidated_by_error: Vec<Loan> = self.all_facts.invalidates.iter().filter(|&(p, l)|
+            *p == self.error_fact.0
+        ).map(|&(p, l)| l).collect();
+
+        debug!("loans_invalidated_by_error: {:?}", loans_invalidated_by_error);
+
+        let mut requires = self.all_facts.borrow_region.clone();
+
+        debug!("requires, only elements from all_facts.borrow_region : {:?}", requires);
+
+        requires.extend(
+            self.output.restricts.iter().flat_map(
+                |(&point, region_map)|
+                    region_map.iter().flat_map(
+                        move |(&region, loans)|
+                            loans.iter().map(move |&loan| (region, loan, point))
+                    )
+            )
+        );
+
+        debug!("requires, after adding elements from output.restricts : {:?}", requires);
+
+        let (error_region, error_loan) = requires.iter().filter(|&(r, l, p)|
+            *p == self.error_fact.0 &&
+                loans_invalidated_by_error.contains(l) &&
+                regions_life_at_error.contains(r)
+        ).map(|&(r, l, _)| (r, l)).next().unwrap();
+
+        debug!("error_point: {:?}", self.error_fact.0);
+        debug!("error_region: {:?}", error_region);
+        debug!("error_loan: {:?}", error_loan);
+        debug!("all_facts.region_live_at: {:?}", self.all_facts.region_live_at);
+        debug!("all_facts.cfg_edge: {:?}", self.all_facts.cfg_edge);
+
+        assert!(self.error_fact.1.contains(&error_loan));
+
+        debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", self.is_later_in_program_or_eq(facts::PointIndex::from(22), facts::PointIndex::from(22)));
+
+        // NOTE this (net two lines) is only for testing of points_of_region, and probably not really needed.
+        let points_of_error_region = self.points_of_region(error_region);
+
+        debug!("points_of_error_region: {:?}", points_of_error_region);
+
+        let mut points_of_error_loan = self.points_of_loan(error_loan);
+        points_of_error_loan.sort_unstable();
+
+        debug!("points_of_error_loan: {:?}", points_of_error_loan);
+
+        let start_points_of_error_region = self.find_start_points(&points_of_error_region);
+
+        debug!("start_points_of_error_region: {:?}", start_points_of_error_region);
+
+        let start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
+
+        debug!("start_points_of_error_loan: {:?}", start_points_of_error_loan);
+
+        let mut path_to_error: Vec<Region> = Vec::new();
+        self.path_to_error_backwards(error_region,&mut path_to_error);
+
+        debug!("path_to_error after done with iteration: {:?}", path_to_error);
+
+        trace!("[compute_error_path] exit");
+    }
+
+    fn points_of_region(&self, region: facts::Region) -> Vec<facts::PointIndex> {
+        self.all_facts.region_live_at.iter().filter(|&(r, p)|
+            *r == region
+        ).map(|&(r, p)| p).collect()
+    }
+
+    /// Takes a loan, and returns all points where this loan is live. This information is retracted from
+    /// the output of a polonius borrow-check. (Must be available as struct fiels)
+    fn points_of_loan(&self, loan: facts::Loan) -> Vec<facts::PointIndex> {
+        self.output.borrow_live_at.iter().filter(|&(_, loans_of_point)|
+            loans_of_point.contains(&loan)
+        ).map(|(p, _)| *p).collect()
+    }
+
+    /// Find the points that are start/entry points into a set of points, based on a given cfg.
+    /// This function takes a set of points (given as a vector of points).
+    /// The cfg that will be used is given (as a vector of tuples of points that give the edges
+    /// as part of the all_facts that must have been retrieved from the compiler and be present as
+    /// field.
+    /// Then, it finds all points in the given set that are points where the program might start to
+    /// touch these points. (i.e. the control flow might enter the points set there)
+    /// This is, it finds all points that only have outgoing edges in the cfg when only considering
+    /// the part of the cfg that is fully covered by the given points, i.e. only edges that are
+    /// connecting pints in the set are considered.
+    fn find_start_points(&self, points: &Vec<facts::PointIndex>) -> Vec<facts::PointIndex> {
+        points.iter().filter(|&challenge|
+            ! self.all_facts.cfg_edge.iter().any(|&(p, q)|
+                q == *challenge &&
+                    points.contains(&p)
+            )
+        ).map(|&p| p).collect()
+    }
+
+    /// finds all regions in the outlives (available as field of the struct) that are directly
+    /// following the region given as start.
+    fn find_next_regions(&self, start: facts::Region)
+                         -> Vec<facts::Region> {
+        self.outlives.iter().filter(|&(r1, r2, _)|
+            *r1 == start
+        ).map(|&(_, r2, _)| r2).collect()
+    }
+
+    /// finds all regions in the outlives (available as field of the struct) that are directly
+    /// before the region given as start.
+    fn find_prev_regions(&self, start: facts::Region)
+                         -> Vec<facts::Region> {
+        self.outlives.iter().filter(|&(_, r2, _)|
+            *r2 == start
+        ).map(|&(r1, _, _)| r1).collect()
+    }
+
+    /// Returns true if there is a point P in points such that this point P is bigger then cmp
+    /// (where bigger means that it is later in the program flow then then previous one)
+    /// NOTE: For now, points are simply compared by their index
+    fn has_bigger_point(&self, points: &Vec<facts::PointIndex>, cmp: facts::PointIndex) -> bool {
+        points.iter().filter(|&p|
+            self.is_later_in_program_or_eq(*p, cmp)
+        ).count() > 0
+    }
+
+    /// check if goal is later in the cfg (given as part of all_facts, that is available as a filed)
+    /// then start, or at the same point
+    fn is_later_in_program_or_eq(&self, goal: facts::PointIndex, start: facts::PointIndex) -> bool {
+        goal == start ||
+            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
+                *p == start && *q == goal
+            ).count() > 0 ||
+            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
+                *p == start && self.is_later_in_program_or_eq(goal, *q)
+            ).count() > 0
+    }
+
+    /// Returns true if there is a point P in points such that this point P is smaller then cmp
+    /// (where smaller means that it is earlier in the program flow then then previous one)
+    /// NOTE: For now, points are simply compared by their index
+    fn has_smaller_point(&self, points: &Vec<facts::PointIndex>, cmp: facts::PointIndex) -> bool {
+        // TODO does (presumably) simply compare points by their index, as usize. No idea if this makes any sense or is any good.
+        points.iter().filter(|&p| *p < cmp).count() > 0
+    }
+
+    fn path_to_error_backwards(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
+                               -> bool {
+        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+        debug!("cur_region (start): {:?}", start);
+        debug!("points_of_cur_region: {:?}", points_of_cur_region);
+        if !cur_path.is_empty() && self.has_bigger_point(&points_of_cur_region, self.error_fact.0) {
+            // end of recursion
+            cur_path.push(start);
+            return true;
+        }
+        // add start to the path, as it will now become part of it.
+        cur_path.push(start);
+        let prev_regions = self.find_prev_regions(start);
+        debug!("prev_regions: {:?}", prev_regions);
+
+        for pr in prev_regions {
+            if cur_path.contains(&pr) {
+                // this element already is part of the path, so there would be circle by adding it again, therefore stop here.
+                continue
+            } else {
+                let mut pr_path = cur_path.clone();
+                if self.path_to_error_backwards(pr, &mut pr_path) {
+                    cur_path.clear();
+                    cur_path.append(&mut pr_path);
+                    return true
+                } else {
+                    continue
+                }
+            }
+        }
+        // There is no more previous region to inspect, and apparently none did lead to a path that leads to "success", so this is probably a dead end, return false.
+        false // setting this to true would cause the result for find_path_in_graph_ex0.rs to be more correct, but I think that doing so is not really "correct" in the sense of what the intention was.
+    }
+}
 
 struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
@@ -576,13 +635,24 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let err_loans = loans;
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
-            compute_error_path(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()), &expl_output.unordered_expl_outlives);
+
+            let error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
+                                                         &self.borrowck_out_facts,
+                                                         (*err_point_ind, err_loans.clone()),
+                                                         &expl_output.unordered_expl_outlives);
+            error_path_finder.compute_error_path();
         }
         //println!("test: {:?}", expl_output.expl_outlives);
 
         let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
         let mut outlives_debug = Vec::new();
         outlives_at = FxHashMap::default();
+
+//        for (region,region2,point) in self.borrowck_in_facts.outlives.clone() {
+//            outlives_at.entry((region, region2)).or_insert(Vec::new()).push(point);
+//            outlives_debug.push((region,region2,point));
+//        }
+
         for (point, region_map) in expl_output.expl_outlives {
             //println!("test: {:?}", point);
             for (region, regions) in region_map {
