@@ -400,6 +400,7 @@ struct ErrorPathFinder<'epf> {
     error_fact: (facts::PointIndex, Vec<facts::Loan>),
     outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>,
     start_points_of_error_loan: Vec<facts::PointIndex>,
+    error_loan: facts::Loan,
 }
 
 impl <'epf> ErrorPathFinder<'epf> {
@@ -411,6 +412,7 @@ impl <'epf> ErrorPathFinder<'epf> {
             error_fact,
             outlives,
             start_points_of_error_loan: Vec::default(),
+            error_loan: facts::Loan::from(0),
         }
     }
 
@@ -448,19 +450,20 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("requires, after adding elements from output.restricts : {:?}", requires);
 
-        let (error_region, error_loan) = requires.iter().filter(|&(r, l, p)|
+        let (error_region, error_loan_var) = requires.iter().filter(|&(r, l, p)|
             *p == self.error_fact.0 &&
                 loans_invalidated_by_error.contains(l) &&
                 regions_life_at_error.contains(r)
         ).map(|&(r, l, _)| (r, l)).next().unwrap();
+        self.error_loan = error_loan_var;
 
         debug!("error_point: {:?}", self.error_fact.0);
         debug!("error_region: {:?}", error_region);
-        debug!("error_loan: {:?}", error_loan);
+        debug!("error_loan: {:?}", self.error_loan);
         debug!("all_facts.region_live_at: {:?}", self.all_facts.region_live_at);
         debug!("all_facts.cfg_edge: {:?}", self.all_facts.cfg_edge);
 
-        assert!(self.error_fact.1.contains(&error_loan));
+        assert!(self.error_fact.1.contains(&self.error_loan));
 
         debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", self.is_later_in_program_or_eq(facts::PointIndex::from(22), facts::PointIndex::from(22)));
 
@@ -469,7 +472,7 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("points_of_error_region: {:?}", points_of_error_region);
 
-        let mut points_of_error_loan = self.points_of_loan(error_loan);
+        let mut points_of_error_loan = self.points_of_loan(self.error_loan);
         points_of_error_loan.sort_unstable();
 
         debug!("points_of_error_loan: {:?}", points_of_error_loan);
@@ -482,10 +485,20 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("start_points_of_error_loan: {:?}", self.start_points_of_error_loan);
 
+        debug!("Start computing path to error:");
+
         let mut path_to_error: Vec<Region> = Vec::new();
         self.path_to_error_backwards(error_region,&mut path_to_error);
 
         debug!("path_to_error after done with iteration: {:?}", path_to_error);
+
+        debug!("----------------------------------------------------------------------------------");
+        debug!("Start computing path to error, OLD version:");
+
+        let mut path_to_error_old: Vec<Region> = Vec::new();
+        self.path_to_error_backwards_old(error_region,&mut path_to_error_old);
+
+        debug!("path_to_error_old after done with iteration: {:?}", path_to_error_old);
 
         trace!("[compute_error_path] exit");
     }
@@ -570,6 +583,18 @@ impl <'epf> ErrorPathFinder<'epf> {
         points.iter().filter(|&p| *p < cmp).count() > 0
     }
 
+    /// This function finds all loans that belong to a certain region as given by the
+    /// all_facts.borrow_region input. (Is available in self)
+    /// Note that this does not give all loans that might be "live" for this region, or relevant for
+    /// this region. This would be given by the (computed) requires relation. Instead, this only
+    /// includes the loans that were considered to belong to a region when they were provided as
+    /// input fact (borrow_region) to the borrow checker.
+    fn loan_of_reagion(&self, reg: facts::Region) -> Vec<facts::Loan> {
+        self.all_facts.borrow_region.iter().filter(|&(r, _, _)|
+            *r == reg
+        ).map(|&(_, l, _)| l).collect()
+    }
+
     fn path_to_error_backwards(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
                                -> bool {
         let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
@@ -581,15 +606,27 @@ impl <'epf> ErrorPathFinder<'epf> {
         // add start to the path, as it will now become part of it.
         cur_path.push(start);
 
-        for sp in start_points_of_cur_region {
-            if self.start_points_of_error_loan.contains(&sp) {
-                // this region's start intersects with the start of the loan that causes the error,
-                // therefore we consider here to be the end of the relevant path, and therefore stop
-                // (end recursion) and return success (true)
-                return true
-            }
-        }
+//        for sp in start_points_of_cur_region {
+//            if self.start_points_of_error_loan.contains(&sp) {
+//                // this region's start intersects with the start of the loan that causes the error,
+//                // therefore we consider here to be the end of the relevant path, and therefore stop
+//                // (end recursion) and return success (true)
+//                return true
+//            }
+//        }
 
+        let input_loans_of_cur_region =  self.loan_of_reagion(start);
+        debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
+
+        if self.all_facts.borrow_region.iter().filter(|&(r, l, p)|
+                    *r == start && *l == self.error_loan
+                ).count() > 0 {
+            // the start region does include the error loan. (May also be called error borrow.)
+            // therefore, stop the recursion here, as we consider this to be gone far enough.
+            // Also, this path is considered to lead to success, so return true
+            debug!("Success path found by path_to_error_backwards, ending at region {:?}", start);
+            return true
+        }
 
         let mut prev_regions = self.find_prev_regions(start);
         prev_regions.dedup();
@@ -613,6 +650,64 @@ impl <'epf> ErrorPathFinder<'epf> {
         // There are no more previous regions to inspect, and apparently none did lead to a path that leads to "success", so this is a dead end, return false.
         false
     }
+
+    /// WARNING: Old version, using old iteration termination criterion!!! (For testing only!)
+    fn path_to_error_backwards_old(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
+                               -> bool {
+        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
+        debug!("cur_region (start): {:?}", start);
+        debug!("points_of_cur_region: {:?}", points_of_cur_region);
+        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
+
+        // add start to the path, as it will now become part of it.
+        cur_path.push(start);
+
+            for sp in start_points_of_cur_region {
+                if self.start_points_of_error_loan.contains(&sp) {
+                    // this region's start intersects with the start of the loan that causes the error,
+                    // therefore we consider here to be the end of the relevant path, and therefore stop
+                    // (end recursion) and return success (true)
+                    return true
+                }
+            }
+
+    //    let input_loans_of_cur_region =  self.loan_of_reagion(start);
+    //    debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
+    //
+    //    if self.all_facts.borrow_region.iter().filter(|&(r, l, p)|
+    //        *r == start && *l == self.error_loan
+    //    ).count() > 0 {
+    //        // the start region does include the error loan. (May also be called error borrow.)
+    //        // therefore, stop the recursion here, as we consider this to be gone far enough.
+    //        // Also, this path is considered to lead to success, so return true
+    //        debug!("Success path found by path_to_error_backwards, ending at region {:?}", start);
+    //        return true
+    //    }
+
+        let mut prev_regions = self.find_prev_regions(start);
+        prev_regions.dedup();
+        debug!("prev_regions: {:?}", prev_regions);
+
+        for pr in prev_regions {
+            if cur_path.contains(&pr) {
+                // this element already is part of the path, so there would be circle by adding it again, therefore stop here.
+                continue
+            } else {
+                let mut pr_path = cur_path.clone();
+                if self.path_to_error_backwards_old(pr, &mut pr_path) {
+                    cur_path.clear();
+                    cur_path.append(&mut pr_path);
+                    return true
+                } else {
+                    continue
+                }
+            }
+        }
+        // There are no more previous regions to inspect, and apparently none did lead to a path that leads to "success", so this is a dead end, return false.
+        false
+    }
+
 }
 
 struct MirInfoPrinter<'a, 'tcx: 'a> {
