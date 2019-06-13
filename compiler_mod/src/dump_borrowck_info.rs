@@ -462,6 +462,7 @@ impl <'epf> ErrorPathFinder<'epf> {
         debug!("error_loan: {:?}", self.error_loan);
         debug!("all_facts.region_live_at: {:?}", self.all_facts.region_live_at);
         debug!("all_facts.cfg_edge: {:?}", self.all_facts.cfg_edge);
+        debug!("all_facts.borrow_region: {:?}", self.all_facts.borrow_region);
 
         assert!(self.error_fact.1.contains(&self.error_loan));
 

@@ -1,0 +1,28 @@
+// This example was taken from the "Rust Compiler Error Index", as this is an example for a certain error index that I
+// think it is worth testing the tool for. (Remember that the tool deals with erroneous programs, and the error index
+// indeed prides examples with errors.) Maybe this example has been modified (or extended). This was sometimes needed
+// in order to make sure that there also is an error when using Rust edition 2018 with NLL. (The index sometimes
+// presents examples that are only erroneous when using edition 2015 with lexical lifetimes)
+//
+// This example is specific for error E0387. (example 0)
+
+#![allow(unused)]
+// Accepts a function or a closure that captures its environment immutably.
+// Closures passed to foo will not be able to mutate their closed-over state.
+fn main() {
+fn foo<F: Fn()>(f: F) { }
+
+// Attempts to mutate closed-over data. Error message reads:
+// `cannot assign to data in a captured outer variable...`
+fn mutable() {
+    let mut x = 0u32;
+    foo(|| x = 2);
+}
+
+// Attempts to take a mutable reference to closed-over data.  Error message
+// reads: `cannot borrow data mutably in a captured outer variable...`
+fn mut_addr() {
+    let mut x = 0u32;
+    foo(|| { let y = &mut x; });
+}
+}
