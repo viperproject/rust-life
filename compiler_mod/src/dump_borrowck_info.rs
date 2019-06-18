@@ -493,13 +493,13 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("path_to_error after done with iteration: {:?}", path_to_error);
 
-        debug!("----------------------------------------------------------------------------------");
-        debug!("Start computing path to error, OLD version:");
-
-        let mut path_to_error_old: Vec<Region> = Vec::new();
-        self.path_to_error_backwards_old(error_region,&mut path_to_error_old);
-
-        debug!("path_to_error_old after done with iteration: {:?}", path_to_error_old);
+//        debug!("----------------------------------------------------------------------------------");
+//        debug!("Start computing path to error, OLD version:");
+//
+//        let mut path_to_error_old: Vec<Region> = Vec::new();
+//        self.path_to_error_backwards_old(error_region,&mut path_to_error_old);
+//
+//        debug!("path_to_error_old after done with iteration: {:?}", path_to_error_old);
 
         trace!("[compute_error_path] exit");
     }
@@ -744,12 +744,21 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             expl_output = compute_error_expl(&self.borrowck_in_facts, &self.borrowck_out_facts, (*err_point_ind, err_loans.clone()));
 
-            let mut error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
+            debug!("Start searching the path to the error, old version that searches expl_outlives (from expl_output):");
+            let mut error_path_finder_old = ErrorPathFinder::new(&self.borrowck_in_facts,
                                                          &self.borrowck_out_facts,
                                                          (*err_point_ind, err_loans.clone()),
                                                          &expl_output.unordered_expl_outlives); // (probably) could also use &self.borrowck_in_facts.outlives
                                                                                             // (not really tested, but looks like working, but maybe not always deterministic.)
+            error_path_finder_old.compute_error_path();
+            debug!("-------------------------------------------------------------------------------------------------------------");
+            debug!("Start searching the path to the error, new version that searches (default) outlives (from borrowck_in_facts):");
+            let mut error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
+                                                                 &self.borrowck_out_facts,
+                                                                 (*err_point_ind, err_loans.clone()),
+                                                                 &self.borrowck_in_facts.outlives);
             error_path_finder.compute_error_path();
+
         }
         //println!("test: {:?}", expl_output.expl_outlives);
 
