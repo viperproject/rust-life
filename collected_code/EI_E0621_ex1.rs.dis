@@ -4,15 +4,17 @@
 // in order to make sure that there also is an error when using Rust edition 2018 with NLL. (The index sometimes
 // presents examples that are only erroneous when using edition 2015 with lexical lifetimes)
 //
-// This example is specific for error E0716. (example 1, i.e. second example from the Error Index)
+// This example is specific for error E0621. (example 0)
+// NOTE: All methods were moved out of the main function to make this example working with the current version (as of 
+// 19.06.2019) of our tool that apparently does not handle inner methods at all.
 
 #![allow(unused)]
 fn main() {
-fn foo() -> i32 { 22 }
-fn bar(x: &i32) -> &i32 { x }
-let p = {
-  let tmp = foo(); // the temporary
-  bar(&tmp)
-}; // <-- tmp is freed as we exit this block
-let q = p;
+
+}
+
+fn foo<'a>(x: &'a i32, y: &i32) -> &'a i32 { // error: explicit lifetime
+                                             //        required in the type of
+                                             //        `y`
+    if x > y { x } else { y }
 }

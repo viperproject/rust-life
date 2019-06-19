@@ -1,3 +1,8 @@
+# Errors that might be potentially relevant for the rust-live tool
+
+## Found by looking at the (online) Rust Error Indes
+The error index can be found at: https://doc.rust-lang.org/error-index.html
+
 E0007
 
 E0382
@@ -41,4 +46,15 @@ E0712
 E0713
 
 E0716
+
+## More, that were found by looking at rust (rustc) source files
+Note that this only includes some that were not part of the list before.
+
+### Found in rust/src/librustc/error_codes.rs
+E0311 to E0316 (inclusive bounds): From the short description, I would guess that all of these are related to "lifetimes" etc.
+None of these are part of the Error Index. (As of today, 13.06.2019, please also note that I looked at the upstream version
+of today of the mentioned file.) None of these errors does have a longer explanation in the file that I (first) found them in,
+and therefore there ware also no code examples that showed how to trigger such an error.
+
+
 

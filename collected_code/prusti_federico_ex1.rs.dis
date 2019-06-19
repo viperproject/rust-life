@@ -1,0 +1,45 @@
+#[derive(Copy, Clone)]
+struct JObject<'a> {
+    val: &'a i32
+}
+
+#[derive(Copy, Clone)]
+struct ViperPosition<'a> { obj: JObject<'a> }
+
+impl<'a> ViperPosition<'a> {
+    fn new(obj: JObject<'a>) -> Self {
+        ViperPosition { obj }
+    }
+    fn to_jobject(&self) -> JObject<'a> {
+        self.obj
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Position {
+    line: i32,
+    column: i32,
+    id: String
+}
+
+struct AstFactory<'v> {
+    val: &'v i32
+}
+
+impl<'v> AstFactory<'v> {
+    fn identifier_position<S: Into<String>>(&self, line: i32, column: i32, pos_id: S) -> ViperPosition { // FIX: ViperPosition<'v>
+        unimplemented!()
+    }
+}
+
+trait ToViper<'v, T> {
+    fn to_viper(&self, ast: &AstFactory<'v>) -> T;
+}
+
+impl<'v> ToViper<'v, ViperPosition<'v>> for Position {
+    fn to_viper(&self, ast: &AstFactory<'v>) -> ViperPosition<'v> {
+        ast.identifier_position(self.line, self.column, self.id.clone())
+    }
+}
+
+fn main(){}
