@@ -24,8 +24,6 @@ use rustc::ty::TyCtxt;
 use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
 use self::regex::Regex;
-use facts::PointType;
-
 
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
@@ -416,7 +414,7 @@ impl <'epf> ErrorPathFinder<'epf> {
         }
     }
 
-    fn compute_error_path(&mut self) {
+    fn compute_error_path(&mut self) -> Vec<facts::Region> {
         trace!("[compute_error_path] enter");
         use self::facts::{PointIndex as Point, Loan, Region};
 
@@ -493,15 +491,9 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("path_to_error after done with iteration: {:?}", path_to_error);
 
-//        debug!("----------------------------------------------------------------------------------");
-//        debug!("Start computing path to error, OLD version:");
-//
-//        let mut path_to_error_old: Vec<Region> = Vec::new();
-//        self.path_to_error_backwards_old(error_region,&mut path_to_error_old);
-//
-//        debug!("path_to_error_old after done with iteration: {:?}", path_to_error_old);
-
         trace!("[compute_error_path] exit");
+
+        path_to_error
     }
 
     fn points_of_region(&self, region: facts::Region) -> Vec<facts::PointIndex> {
@@ -652,62 +644,62 @@ impl <'epf> ErrorPathFinder<'epf> {
         false
     }
 
-    /// WARNING: Old version, using old iteration termination criterion!!! (For testing only!)
-    fn path_to_error_backwards_old(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
-                               -> bool {
-        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
-        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
-        debug!("cur_region (start): {:?}", start);
-        debug!("points_of_cur_region: {:?}", points_of_cur_region);
-        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
-
-        // add start to the path, as it will now become part of it.
-        cur_path.push(start);
-
-            for sp in start_points_of_cur_region {
-                if self.start_points_of_error_loan.contains(&sp) {
-                    // this region's start intersects with the start of the loan that causes the error,
-                    // therefore we consider here to be the end of the relevant path, and therefore stop
-                    // (end recursion) and return success (true)
-                    return true
-                }
-            }
-
-    //    let input_loans_of_cur_region =  self.loan_of_reagion(start);
-    //    debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
-    //
-    //    if self.all_facts.borrow_region.iter().filter(|&(r, l, p)|
-    //        *r == start && *l == self.error_loan
-    //    ).count() > 0 {
-    //        // the start region does include the error loan. (May also be called error borrow.)
-    //        // therefore, stop the recursion here, as we consider this to be gone far enough.
-    //        // Also, this path is considered to lead to success, so return true
-    //        debug!("Success path found by path_to_error_backwards, ending at region {:?}", start);
-    //        return true
-    //    }
-
-        let mut prev_regions = self.find_prev_regions(start);
-        prev_regions.dedup();
-        debug!("prev_regions: {:?}", prev_regions);
-
-        for pr in prev_regions {
-            if cur_path.contains(&pr) {
-                // this element already is part of the path, so there would be circle by adding it again, therefore stop here.
-                continue
-            } else {
-                let mut pr_path = cur_path.clone();
-                if self.path_to_error_backwards_old(pr, &mut pr_path) {
-                    cur_path.clear();
-                    cur_path.append(&mut pr_path);
-                    return true
-                } else {
-                    continue
-                }
-            }
-        }
-        // There are no more previous regions to inspect, and apparently none did lead to a path that leads to "success", so this is a dead end, return false.
-        false
-    }
+//    /// WARNING: Old version, using old iteration termination criterion!!! (For testing only!)
+//    fn path_to_error_backwards_old(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
+//                               -> bool {
+//        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+//        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
+//        debug!("cur_region (start): {:?}", start);
+//        debug!("points_of_cur_region: {:?}", points_of_cur_region);
+//        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
+//
+//        // add start to the path, as it will now become part of it.
+//        cur_path.push(start);
+//
+//            for sp in start_points_of_cur_region {
+//                if self.start_points_of_error_loan.contains(&sp) {
+//                    // this region's start intersects with the start of the loan that causes the error,
+//                    // therefore we consider here to be the end of the relevant path, and therefore stop
+//                    // (end recursion) and return success (true)
+//                    return true
+//                }
+//            }
+//
+//    //    let input_loans_of_cur_region =  self.loan_of_reagion(start);
+//    //    debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
+//    //
+//    //    if self.all_facts.borrow_region.iter().filter(|&(r, l, p)|
+//    //        *r == start && *l == self.error_loan
+//    //    ).count() > 0 {
+//    //        // the start region does include the error loan. (May also be called error borrow.)
+//    //        // therefore, stop the recursion here, as we consider this to be gone far enough.
+//    //        // Also, this path is considered to lead to success, so return true
+//    //        debug!("Success path found by path_to_error_backwards, ending at region {:?}", start);
+//    //        return true
+//    //    }
+//
+//        let mut prev_regions = self.find_prev_regions(start);
+//        prev_regions.dedup();
+//        debug!("prev_regions: {:?}", prev_regions);
+//
+//        for pr in prev_regions {
+//            if cur_path.contains(&pr) {
+//                // this element already is part of the path, so there would be circle by adding it again, therefore stop here.
+//                continue
+//            } else {
+//                let mut pr_path = cur_path.clone();
+//                if self.path_to_error_backwards_old(pr, &mut pr_path) {
+//                    cur_path.clear();
+//                    cur_path.append(&mut pr_path);
+//                    return true
+//                } else {
+//                    continue
+//                }
+//            }
+//        }
+//        // There are no more previous regions to inspect, and apparently none did lead to a path that leads to "success", so this is a dead end, return false.
+//        false
+//    }
 
 }
 
@@ -732,11 +724,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let expl_graph_path = PathBuf::from("nll-facts")
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("outlive_graph.dot");
-        let mut outlive_graph = File::create(expl_graph_path).expect("Unable to create file");
-
-        writeln!(outlive_graph, "digraph G {{");
 
         let mut expl_output = ExplOutput::new();
+
+        let mut path_to_explain_last_error: Vec<facts::Region> = Vec::default();
 
         for (point, loans) in self.borrowck_out_facts.errors.iter() {
             let err_point_ind = point;
@@ -746,21 +737,19 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             debug!("Start searching the path to the error, old version that searches expl_outlives (from expl_output):");
             let mut error_path_finder_old = ErrorPathFinder::new(&self.borrowck_in_facts,
-                                                         &self.borrowck_out_facts,
-                                                         (*err_point_ind, err_loans.clone()),
-                                                         &expl_output.unordered_expl_outlives); // (probably) could also use &self.borrowck_in_facts.outlives
-                                                                                            // (not really tested, but looks like working, but maybe not always deterministic.)
+                                                                 &self.borrowck_out_facts,
+                                                                 (*err_point_ind, err_loans.clone()),
+                                                                 &expl_output.unordered_expl_outlives); // (probably) could also use &self.borrowck_in_facts.outlives
+            // (not really tested, but looks like working, but maybe not always deterministic.)
             error_path_finder_old.compute_error_path();
             debug!("-------------------------------------------------------------------------------------------------------------");
             debug!("Start searching the path to the error, new version that searches (default) outlives (from borrowck_in_facts):");
             let mut error_path_finder = ErrorPathFinder::new(&self.borrowck_in_facts,
-                                                                 &self.borrowck_out_facts,
-                                                                 (*err_point_ind, err_loans.clone()),
-                                                                 &self.borrowck_in_facts.outlives);
-            error_path_finder.compute_error_path();
-
+                                                             &self.borrowck_out_facts,
+                                                             (*err_point_ind, err_loans.clone()),
+                                                             &self.borrowck_in_facts.outlives);
+            path_to_explain_last_error = error_path_finder.compute_error_path();
         }
-        //println!("test: {:?}", expl_output.expl_outlives);
 
         let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
         let mut outlives_debug = Vec::new();
@@ -777,7 +766,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 for region2 in regions {
                     //println!("{:?} -> {:?} [LABEL=\"{:?}\"]", region, region2, point);
                     outlives_at.entry((region, region2)).or_insert(Vec::new()).push(point);
-                    outlives_debug.push((region,region2,point));
+                    outlives_debug.push((region, region2, point));
                 }
             }
         }
@@ -790,8 +779,45 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         println!("debug_errors: {:?}", output.errors);
 
+        if ! path_to_explain_last_error.is_empty() {
+            let mut graph_to_explain_last_error: FxHashMap<(facts::Region, facts::Region),
+                Vec<facts::PointIndex>> = FxHashMap::default();
+            let mut prev_region = path_to_explain_last_error.pop().unwrap();
+            path_to_explain_last_error.iter().rev().for_each(|&r| -> () {
+                graph_to_explain_last_error.insert((prev_region, r), Vec::new());
+                prev_region = r;
+                }
+            );
+
+            debug!("graph_to_explain_last_error: {:?}", graph_to_explain_last_error);
+
+            self.print_outlive_error_graph(&graph_to_explain_last_error, &expl_graph_path);
+        }
 
 
+        //self.print_outlive_error_graph(&outlives_at, &expl_graph_path);
+    }
+
+    /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
+    /// intended to describe a lifetime error in a program or it is an outlives graph (of some
+    /// portion) of a Rust program. During the printing process, the graph is also enriched with
+    /// some information from the program (e.g. source lines) that shall help to understand it and
+    /// to associate it with the program it originates form.
+    /// The graph that shall be printed is given as an FxHashMap that maps from a tuple of regions
+    /// to a vector of points. Note that the actual graph is described by the tuples that are used
+    /// as keys. These tuples describe the edges of the graph. The points only provided additional
+    /// information about where (in the program) these edges arise.
+    /// The path to which the graph that will be written is given by the PathBuf graph_out_path. It
+    /// must give a complete path to a file, either relative to the working directory or as absolute
+    /// path, and it must also contain the file name. Note that any file that already exists at this
+    /// location will be overwritten.
+    fn print_outlive_error_graph(&self,
+                                 outlives_at: &FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>,
+                                 graph_out_path: &PathBuf) {
+
+        let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
+
+        writeln!(outlive_graph, "digraph G {{");
 
         let mut regions_done = Vec::new();
 
@@ -804,9 +830,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
 
         }
-
-
-
 
         let mut i = 0;
 
