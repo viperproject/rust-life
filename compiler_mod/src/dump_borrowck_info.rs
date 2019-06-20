@@ -52,7 +52,7 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
                 _b: hir::BodyId, _s: syntax_pos::Span, hir_id: hir::HirId) {
         let name = match fk {
             intravisit::FnKind::ItemFn(name, ..) => name,
-            _ => return,
+            _ => return, // Do not skip here if it is a method, but handle methods as well (get name etc.)
         };
 
         trace!("[visit_fn] enter name={:?}", name);
@@ -721,10 +721,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     }
 
     fn print_error(&self) {
-        let expl_graph_path = PathBuf::from("nll-facts")
-            .join(self.def_path.to_filename_friendly_no_crate())
-            .join("outlive_graph.dot");
-
         let mut expl_output = ExplOutput::new();
 
         let mut path_to_explain_last_error: Vec<facts::Region> = Vec::default();
@@ -783,19 +779,32 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let mut graph_to_explain_last_error: FxHashMap<(facts::Region, facts::Region),
                 Vec<facts::PointIndex>> = FxHashMap::default();
             let mut prev_region = path_to_explain_last_error.pop().unwrap();
-            path_to_explain_last_error.iter().rev().for_each(|&r| -> () {
-                graph_to_explain_last_error.insert((prev_region, r), Vec::new());
+            path_to_explain_last_error.iter().rev().for_each(|&r| {
+                let mut points_of_edge: Vec<_> =
+                    self.borrowck_in_facts.outlives.iter().filter(|&(r1, r2, _)|
+                        *r1 == prev_region && *r2 == r
+                    ).map(|&(_, _, p)| p).collect();
+                points_of_edge.dedup();
+                graph_to_explain_last_error.insert((prev_region, r), points_of_edge);
                 prev_region = r;
-                }
+            }
             );
+
+            debug!("borrowck_in_facts.outlives: {:?}", self.borrowck_in_facts.outlives);
 
             debug!("graph_to_explain_last_error: {:?}", graph_to_explain_last_error);
 
-            self.print_outlive_error_graph(&graph_to_explain_last_error, &expl_graph_path);
+            let error_graph_path = PathBuf::from("nll-facts")
+            .join(self.def_path.to_filename_friendly_no_crate())
+            .join("error_graph.dot");
+
+            self.print_outlive_error_graph(&graph_to_explain_last_error, &error_graph_path);
         }
 
-
-        //self.print_outlive_error_graph(&outlives_at, &expl_graph_path);
+        let expl_graph_path = PathBuf::from("nll-facts")
+            .join(self.def_path.to_filename_friendly_no_crate())
+            .join("outlive_graph.dot");
+        self.print_outlive_error_graph(&outlives_at, &expl_graph_path);
     }
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
