@@ -24,6 +24,7 @@ use rustc::ty::TyCtxt;
 use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
 use self::regex::Regex;
+use self::facts::{PointIndex, Loan, Region};
 
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
@@ -116,11 +117,11 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 }
 
 struct ExplOutput{
-    pub expl_outlives: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Region>>>,
-    pub expl_subset: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Region>>>,
-    pub expl_requires: FxHashMap<facts::PointIndex, BTreeMap<facts::Region, BTreeSet<facts::Loan>>>,
-    pub expl_borrow_live_at: FxHashMap<facts::PointIndex, Vec<facts::Loan>>,
-    pub unordered_expl_outlives: Vec<(facts::Region, facts::Region, facts::PointIndex)>,
+    pub expl_outlives: FxHashMap<PointIndex, BTreeMap<Region, BTreeSet<Region>>>,
+    pub expl_subset: FxHashMap<PointIndex, BTreeMap<Region, BTreeSet<Region>>>,
+    pub expl_requires: FxHashMap<PointIndex, BTreeMap<Region, BTreeSet<Loan>>>,
+    pub expl_borrow_live_at: FxHashMap<PointIndex, Vec<Loan>>,
+    pub unordered_expl_outlives: Vec<(Region, Region, PointIndex)>,
 
 }
 
@@ -138,10 +139,7 @@ impl ExplOutput{
 
 }
 
-fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (facts::PointIndex, Vec<facts::Loan>)) -> ExplOutput {
-
-
-    use self::facts::{PointIndex as Point, Loan, Region};
+fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutputFacts, error_fact: (PointIndex, Vec<Loan>)) -> ExplOutput {
 
     let mut result = ExplOutput::new();
 
@@ -149,17 +147,17 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
         let mut iteration = datafrog::Iteration::new();
         // .. some variables, ..
-        let subset = iteration.variable::<(Region, Region, Point)>("subset");
-        let new_subset = iteration.variable::<((Region, Region, Point),())>("new_subset");
-        let outlives = iteration.variable::<(Region, Region, Point)>("outlives");
-        let new_outlives = iteration.variable::<((Region, Region, Point),())>("new_outlives");
-        let requires = iteration.variable::<(Region, Loan, Point)>("requires");
-        let new_requires = iteration.variable::<((Region, Loan, Point),())>("new_requires");
-        let borrow_live_at = iteration.variable::<(Loan, Point)>("borrow_live_at");
-        let new_borrow_live_at = iteration.variable::<((Loan, Point), ())>("new_borrow_live_at");
+        let subset = iteration.variable::<(Region, Region, PointIndex)>("subset");
+        let new_subset = iteration.variable::<((Region, Region, PointIndex),())>("new_subset");
+        let outlives = iteration.variable::<(Region, Region, PointIndex)>("outlives");
+        let new_outlives = iteration.variable::<((Region, Region, PointIndex),())>("new_outlives");
+        let requires = iteration.variable::<(Region, Loan, PointIndex)>("requires");
+        let new_requires = iteration.variable::<((Region, Loan, PointIndex),())>("new_requires");
+        let borrow_live_at = iteration.variable::<(Loan, PointIndex)>("borrow_live_at");
+        let new_borrow_live_at = iteration.variable::<((Loan, PointIndex), ())>("new_borrow_live_at");
 
         // `invalidates` facts, stored ready for joins
-        let invalidates = iteration.variable::<((Loan, Point), ())>("invalidates");
+        let invalidates = iteration.variable::<((Loan, PointIndex), ())>("invalidates");
 
         // different indices for `subset`.
         let subset_r1p = iteration.variable_indistinct("subset_r1p");
@@ -195,17 +193,17 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
         let requires_5 = iteration.variable_indistinct("requires_5");
 
         let killed = all_facts.killed.clone().into();
-        let region_live_at = iteration.variable::<((Region, Point), ())>("region_live_at");
-        let cfg_edge_p = iteration.variable::<(Point, Point)>("cfg_edge_p");
-        let new_cfg_edge = iteration.variable::<((Point, Point),())>("new_cfg_edge");
+        let region_live_at = iteration.variable::<((Region, PointIndex), ())>("region_live_at");
+        let cfg_edge_p = iteration.variable::<(PointIndex, PointIndex)>("cfg_edge_p");
+        let new_cfg_edge = iteration.variable::<((PointIndex, PointIndex),())>("new_cfg_edge");
 
-        let init_expl_error = iteration.variable::<(Point,Loan)>("init_expl_error");
-        let expl_error = iteration.variable::<(Loan,Point)>("expl_error");
-        let new_expl_error = iteration.variable::<((Loan,Point),())>("new_expl_error");
-        let expl_subset = iteration.variable::<(Region, Region, Point)>("expl_subset");
-        let new_expl_subset = iteration.variable::<((Region, Region, Point),())>("new_expl_subset");
-        let expl_requires = iteration.variable::<(Region, Loan, Point)>("expl_requires");
-        let expl_borrow_live_at = iteration.variable::<(Loan, Point)>("expl_borrow_live_at");
+        let init_expl_error = iteration.variable::<(PointIndex,Loan)>("init_expl_error");
+        let expl_error = iteration.variable::<(Loan,PointIndex)>("expl_error");
+        let new_expl_error = iteration.variable::<((Loan,PointIndex),())>("new_expl_error");
+        let expl_subset = iteration.variable::<(Region, Region, PointIndex)>("expl_subset");
+        let new_expl_subset = iteration.variable::<((Region, Region, PointIndex),())>("new_expl_subset");
+        let expl_requires = iteration.variable::<(Region, Loan, PointIndex)>("expl_requires");
+        let expl_borrow_live_at = iteration.variable::<(Loan, PointIndex)>("expl_borrow_live_at");
 
         let expl_borrow_live_at_1 = iteration.variable_indistinct("expl_borrow_live_at_1");
         let expl_borrow_live_at_p = iteration.variable_indistinct("expl_borrow_live_at_p");
@@ -395,28 +393,27 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 struct ErrorPathFinder<'epf> {
     all_facts: &'epf facts::AllInputFacts,
     output: &'epf facts::AllOutputFacts,
-    error_fact: (facts::PointIndex, Vec<facts::Loan>),
-    outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>,
-    start_points_of_error_loan: Vec<facts::PointIndex>,
-    error_loan: facts::Loan,
+    error_fact: (PointIndex, Vec<Loan>),
+    outlives: &'epf Vec<(Region, Region, PointIndex)>,
+    start_points_of_error_loan: Vec<PointIndex>,
+    error_loan: Loan,
 }
 
 impl <'epf> ErrorPathFinder<'epf> {
     fn new(all_facts: &'epf facts::AllInputFacts, output: &'epf facts::AllOutputFacts,
-           error_fact: (facts::PointIndex, Vec<facts::Loan>), outlives: &'epf Vec<(facts::Region, facts::Region, facts::PointIndex)>) -> Self {
+           error_fact: (PointIndex, Vec<Loan>), outlives: &'epf Vec<(Region, Region, PointIndex)>) -> Self {
         ErrorPathFinder {
             all_facts,
             output,
             error_fact,
             outlives,
             start_points_of_error_loan: Vec::default(),
-            error_loan: facts::Loan::from(0),
+            error_loan: Loan::from(0),
         }
     }
 
-    fn compute_error_path(&mut self) -> Vec<facts::Region> {
+    fn compute_error_path(&mut self) -> Vec<Region> {
         trace!("[compute_error_path] enter");
-        use self::facts::{PointIndex as Point, Loan, Region};
 
         let regions_life_at_error: Vec<Region> = self.all_facts.region_live_at.iter().filter(|&(r, p)|
             *p == self.error_fact.0
@@ -464,7 +461,7 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         assert!(self.error_fact.1.contains(&self.error_loan));
 
-        debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", self.is_later_in_program_or_eq(facts::PointIndex::from(22), facts::PointIndex::from(22)));
+        debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", self.is_later_in_program_or_eq(PointIndex::from(22), PointIndex::from(22)));
 
         // NOTE this (net two lines) is only for testing of points_of_region, and probably not really needed.
         let points_of_error_region = self.points_of_region(error_region);
@@ -496,7 +493,7 @@ impl <'epf> ErrorPathFinder<'epf> {
         path_to_error
     }
 
-    fn points_of_region(&self, region: facts::Region) -> Vec<facts::PointIndex> {
+    fn points_of_region(&self, region: Region) -> Vec<PointIndex> {
         self.all_facts.region_live_at.iter().filter(|&(r, p)|
             *r == region
         ).map(|&(r, p)| p).collect()
@@ -504,7 +501,7 @@ impl <'epf> ErrorPathFinder<'epf> {
 
     /// Takes a loan, and returns all points where this loan is live. This information is retracted from
     /// the output of a polonius borrow-check. (Must be available as struct fiels)
-    fn points_of_loan(&self, loan: facts::Loan) -> Vec<facts::PointIndex> {
+    fn points_of_loan(&self, loan: Loan) -> Vec<PointIndex> {
         self.output.borrow_live_at.iter().filter(|&(_, loans_of_point)|
             loans_of_point.contains(&loan)
         ).map(|(p, _)| *p).collect()
@@ -520,7 +517,7 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// This is, it finds all points that only have outgoing edges in the cfg when only considering
     /// the part of the cfg that is fully covered by the given points, i.e. only edges that are
     /// connecting pints in the set are considered.
-    fn find_start_points(&self, points: &Vec<facts::PointIndex>) -> Vec<facts::PointIndex> {
+    fn find_start_points(&self, points: &Vec<PointIndex>) -> Vec<PointIndex> {
         points.iter().filter(|&challenge|
             ! self.all_facts.cfg_edge.iter().any(|&(p, q)|
                 q == *challenge &&
@@ -531,8 +528,8 @@ impl <'epf> ErrorPathFinder<'epf> {
 
     /// finds all regions in the outlives (available as field of the struct) that are directly
     /// following the region given as start.
-    fn find_next_regions(&self, start: facts::Region)
-                         -> Vec<facts::Region> {
+    fn find_next_regions(&self, start: Region)
+                         -> Vec<Region> {
         self.outlives.iter().filter(|&(r1, r2, _)|
             *r1 == start
         ).map(|&(_, r2, _)| r2).collect()
@@ -540,8 +537,8 @@ impl <'epf> ErrorPathFinder<'epf> {
 
     /// finds all regions in the outlives (available as field of the struct) that are directly
     /// before the region given as start.
-    fn find_prev_regions(&self, start: facts::Region)
-                         -> Vec<facts::Region> {
+    fn find_prev_regions(&self, start: Region)
+                         -> Vec<Region> {
         self.outlives.iter().filter(|&(_, r2, _)|
             *r2 == start
         ).map(|&(r1, _, _)| r1).collect()
@@ -550,7 +547,7 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// Returns true if there is a point P in points such that this point P is bigger then cmp
     /// (where bigger means that it is later in the program flow then then previous one)
     /// NOTE: For now, points are simply compared by their index
-    fn has_bigger_point(&self, points: &Vec<facts::PointIndex>, cmp: facts::PointIndex) -> bool {
+    fn has_bigger_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
         points.iter().filter(|&p|
             self.is_later_in_program_or_eq(*p, cmp)
         ).count() > 0
@@ -558,7 +555,7 @@ impl <'epf> ErrorPathFinder<'epf> {
 
     /// check if goal is later in the cfg (given as part of all_facts, that is available as a filed)
     /// then start, or at the same point
-    fn is_later_in_program_or_eq(&self, goal: facts::PointIndex, start: facts::PointIndex) -> bool {
+    fn is_later_in_program_or_eq(&self, goal: PointIndex, start: PointIndex) -> bool {
         goal == start ||
             self.all_facts.cfg_edge.iter().filter(|&(p, q)|
                 *p == start && *q == goal
@@ -571,7 +568,7 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// Returns true if there is a point P in points such that this point P is smaller then cmp
     /// (where smaller means that it is earlier in the program flow then then previous one)
     /// NOTE: For now, points are simply compared by their index
-    fn has_smaller_point(&self, points: &Vec<facts::PointIndex>, cmp: facts::PointIndex) -> bool {
+    fn has_smaller_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
         // TODO does (presumably) simply compare points by their index, as usize. No idea if this makes any sense or is any good.
         points.iter().filter(|&p| *p < cmp).count() > 0
     }
@@ -582,15 +579,15 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// this region. This would be given by the (computed) requires relation. Instead, this only
     /// includes the loans that were considered to belong to a region when they were provided as
     /// input fact (borrow_region) to the borrow checker.
-    fn loan_of_reagion(&self, reg: facts::Region) -> Vec<facts::Loan> {
+    fn loan_of_reagion(&self, reg: Region) -> Vec<Loan> {
         self.all_facts.borrow_region.iter().filter(|&(r, _, _)|
             *r == reg
         ).map(|&(_, l, _)| l).collect()
     }
 
-    fn path_to_error_backwards(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
+    fn path_to_error_backwards(&self, start: Region, mut cur_path: &mut Vec<Region>)
                                -> bool {
-        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+        let points_of_cur_region: Vec<PointIndex> = self.points_of_region(start);
         let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
         debug!("cur_region (start): {:?}", start);
         debug!("points_of_cur_region: {:?}", points_of_cur_region);
@@ -645,9 +642,9 @@ impl <'epf> ErrorPathFinder<'epf> {
     }
 
 //    /// WARNING: Old version, using old iteration termination criterion!!! (For testing only!)
-//    fn path_to_error_backwards_old(&self, start: facts::Region, mut cur_path: &mut Vec<facts::Region>)
+//    fn path_to_error_backwards_old(&self, start: Region, mut cur_path: &mut Vec<Region>)
 //                               -> bool {
-//        let points_of_cur_region: Vec<facts::PointIndex> = self.points_of_region(start);
+//        let points_of_cur_region: Vec<PointIndex> = self.points_of_region(start);
 //        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
 //        debug!("cur_region (start): {:?}", start);
 //        debug!("points_of_cur_region: {:?}", points_of_cur_region);
@@ -709,7 +706,7 @@ struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub borrowck_in_facts: facts::AllInputFacts,
     pub borrowck_out_facts: facts::AllOutputFacts,
     pub interner: facts::Interner,
-	pub variable_regions: HashMap<mir::Local, facts::Region>,
+	pub variable_regions: HashMap<mir::Local, Region>,
     pub def_path: rustc::hir::map::DefPath,
 }
 
@@ -723,7 +720,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     fn print_error(&self) {
         let mut expl_output = ExplOutput::new();
 
-        let mut path_to_explain_last_error: Vec<facts::Region> = Vec::default();
+        let mut path_to_explain_last_error: Vec<Region> = Vec::default();
 
         for (point, loans) in self.borrowck_out_facts.errors.iter() {
             let err_point_ind = point;
@@ -747,7 +744,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             path_to_explain_last_error = error_path_finder.compute_error_path();
         }
 
-        let mut outlives_at: FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>;
+        let mut outlives_at: FxHashMap<(Region, Region), Vec<PointIndex>>;
         let mut outlives_debug = Vec::new();
         outlives_at = FxHashMap::default();
 
@@ -776,8 +773,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         println!("debug_errors: {:?}", output.errors);
 
         if ! path_to_explain_last_error.is_empty() {
-            let mut graph_to_explain_last_error: FxHashMap<(facts::Region, facts::Region),
-                Vec<facts::PointIndex>> = FxHashMap::default();
+            let mut graph_to_explain_last_error: FxHashMap<(Region, Region),
+                Vec<PointIndex>> = FxHashMap::default();
             let mut prev_region = path_to_explain_last_error.pop().unwrap();
             path_to_explain_last_error.iter().rev().for_each(|&r| {
                 let mut points_of_edge: Vec<_> =
@@ -821,7 +818,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// path, and it must also contain the file name. Note that any file that already exists at this
     /// location will be overwritten.
     fn print_outlive_error_graph(&self,
-                                 outlives_at: &FxHashMap<(facts::Region, facts::Region), Vec<facts::PointIndex>>,
+                                 outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
                                  graph_out_path: &PathBuf) {
 
         let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
