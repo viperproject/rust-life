@@ -390,16 +390,24 @@ fn compute_error_expl(all_facts: &facts::AllInputFacts, output: &facts::AllOutpu
 
 }
 
+/// This struct holds the functions and data that is needed to find a path in an outlives graph
+/// that shall be sufficient to describe and explain a given error (that was detected by the (naive)
+/// Poloinus borrow checker) and should be helpful to understand the causes for the error.
+/// After initializing all needed fields (best done by using the provided constructor), call
+/// compute_error_path() to run the actual path computation and to get back the resulting path.
 struct ErrorPathFinder<'epf> {
     all_facts: &'epf facts::AllInputFacts,
     output: &'epf facts::AllOutputFacts,
     error_fact: (PointIndex, Vec<Loan>),
     outlives: &'epf Vec<(Region, Region, PointIndex)>,
-    start_points_of_error_loan: Vec<PointIndex>,
+//    start_points_of_error_loan: Vec<PointIndex>,
     error_loan: Loan,
 }
 
 impl <'epf> ErrorPathFinder<'epf> {
+    /// The constructor to create a new instance and inserting all needed information into it.
+    /// When this constructor was executed (with sensible arguments), the struct instance is ready
+    /// to run the path computation.
     fn new(all_facts: &'epf facts::AllInputFacts, output: &'epf facts::AllOutputFacts,
            error_fact: (PointIndex, Vec<Loan>), outlives: &'epf Vec<(Region, Region, PointIndex)>) -> Self {
         ErrorPathFinder {
@@ -407,11 +415,28 @@ impl <'epf> ErrorPathFinder<'epf> {
             output,
             error_fact,
             outlives,
-            start_points_of_error_loan: Vec::default(),
+//            start_points_of_error_loan: Vec::default(),
             error_loan: Loan::from(0),
         }
     }
 
+    /// The method that does run the entire path computation, using the information that is provided
+    /// by the fields of the struct instance it is called on. Best call this after initiation a
+    /// struct instance with the provided constructor.
+    /// Note that this method will change some of the fields of the struct, and it is not forseen
+    /// to run this method more then once on the same struct instance. (This might work, but it was
+    /// never tested and no guarantees are provided.) I.e. it is not guaranteed that this method
+    /// is idempotent with respect to the struct and it's result.
+    /// On completion, the method will return the path as a vector of regions (facts::Region).
+    /// This gives a simple, portable and unique representation of the found path. However, please
+    /// note that the path is given in backwards direction. I.e. the first element of the vector
+    /// it the last of the path in the outlives relation (graph).
+    /// When no such path is found an empty vector (Vec::default()) is returned. However, it is not
+    /// clear to the author (as of now) if this can even happen at all if only valid, non-modified
+    /// inputs form the rustc compiler (currently used version) and the (naive) Polonius are
+    /// provided to the constructor. (At least the author thinks that he did not find a input that
+    /// led to such a behaviour as of now.) If such a case will occur, this method will print a
+    /// warning to the log.
     fn compute_error_path(&mut self) -> Vec<Region> {
         trace!("[compute_error_path] enter");
 
@@ -430,8 +455,6 @@ impl <'epf> ErrorPathFinder<'epf> {
         debug!("loans_invalidated_by_error: {:?}", loans_invalidated_by_error);
 
         let mut requires = self.all_facts.borrow_region.clone();
-
-        debug!("requires, only elements from all_facts.borrow_region : {:?}", requires);
 
         requires.extend(
             self.output.restricts.iter().flat_map(
@@ -461,79 +484,78 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         assert!(self.error_fact.1.contains(&self.error_loan));
 
-        debug!("TEST is_later_in_program_or_eq(P22, P22), should be true: {:?}", self.is_later_in_program_or_eq(PointIndex::from(22), PointIndex::from(22)));
+//        let mut points_of_error_loan = self.points_of_loan(self.error_loan);
+//        points_of_error_loan.sort_unstable();
+//
+//        debug!("points_of_error_loan: {:?}", points_of_error_loan);
 
-        // NOTE this (net two lines) is only for testing of points_of_region, and probably not really needed.
-        let points_of_error_region = self.points_of_region(error_region);
+//        let start_points_of_error_region = self.find_start_points(&points_of_error_region);
+//
+//        debug!("start_points_of_error_region: {:?}", start_points_of_error_region);
 
-        debug!("points_of_error_region: {:?}", points_of_error_region);
-
-        let mut points_of_error_loan = self.points_of_loan(self.error_loan);
-        points_of_error_loan.sort_unstable();
-
-        debug!("points_of_error_loan: {:?}", points_of_error_loan);
-
-        let start_points_of_error_region = self.find_start_points(&points_of_error_region);
-
-        debug!("start_points_of_error_region: {:?}", start_points_of_error_region);
-
-        self.start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
-
-        debug!("start_points_of_error_loan: {:?}", self.start_points_of_error_loan);
+//        self.start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
+//
+//        debug!("start_points_of_error_loan: {:?}", self.start_points_of_error_loan);
 
         debug!("Start computing path to error:");
 
         let mut path_to_error: Vec<Region> = Vec::new();
-        self.path_to_error_backwards(error_region,&mut path_to_error);
+        let res = self.path_to_error_backwards(error_region,&mut path_to_error);
 
         debug!("path_to_error after done with iteration: {:?}", path_to_error);
 
         trace!("[compute_error_path] exit");
 
-        path_to_error
+        if res {
+            path_to_error
+        } else {
+            warn!("No path to explain the error was found for the start point {:?} and error loan \
+                    {:?}!", self.error_fact.0, self.error_loan);
+            Vec::default()
+        }
     }
 
-    fn points_of_region(&self, region: Region) -> Vec<PointIndex> {
-        self.all_facts.region_live_at.iter().filter(|&(r, p)|
-            *r == region
-        ).map(|&(r, p)| p).collect()
-    }
+//    fn points_of_region(&self, region: Region) -> Vec<PointIndex> {
+//        self.all_facts.region_live_at.iter().filter(|&(r, p)|
+//            *r == region
+//        ).map(|&(r, p)| p).collect()
+//    }
 
-    /// Takes a loan, and returns all points where this loan is live. This information is retracted from
-    /// the output of a polonius borrow-check. (Must be available as struct fiels)
-    fn points_of_loan(&self, loan: Loan) -> Vec<PointIndex> {
-        self.output.borrow_live_at.iter().filter(|&(_, loans_of_point)|
-            loans_of_point.contains(&loan)
-        ).map(|(p, _)| *p).collect()
-    }
+//    /// Takes a loan, and returns all points where this loan is live. This information is retracted from
+//    /// the output of a polonius borrow-check. (Must be available as struct fiels)
+//    fn points_of_loan(&self, loan: Loan) -> Vec<PointIndex> {
+//        self.output.borrow_live_at.iter().filter(|&(_, loans_of_point)|
+//            loans_of_point.contains(&loan)
+//        ).map(|(p, _)| *p).collect()
+//    }
 
-    /// Find the points that are start/entry points into a set of points, based on a given cfg.
-    /// This function takes a set of points (given as a vector of points).
-    /// The cfg that will be used is given (as a vector of tuples of points that give the edges
-    /// as part of the all_facts that must have been retrieved from the compiler and be present as
-    /// field.
-    /// Then, it finds all points in the given set that are points where the program might start to
-    /// touch these points. (i.e. the control flow might enter the points set there)
-    /// This is, it finds all points that only have outgoing edges in the cfg when only considering
-    /// the part of the cfg that is fully covered by the given points, i.e. only edges that are
-    /// connecting pints in the set are considered.
-    fn find_start_points(&self, points: &Vec<PointIndex>) -> Vec<PointIndex> {
-        points.iter().filter(|&challenge|
-            ! self.all_facts.cfg_edge.iter().any(|&(p, q)|
-                q == *challenge &&
-                    points.contains(&p)
-            )
-        ).map(|&p| p).collect()
-    }
+//    /// Find the points that are start/entry points into a set of points, based on a given cfg.
+//    /// This function takes a set of points (given as a vector of points).
+//    /// The cfg that will be used is given (as a vector of tuples of points that give the edges
+//    /// as part of the all_facts that must have been retrieved from the compiler and be present as
+//    /// field.
+//    /// Then, it finds all points in the given set that are points where the program might start to
+//    /// touch these points. (i.e. the control flow might enter the points set there)
+//    /// This is, it finds all points that only have outgoing edges in the cfg when only considering
+//    /// the part of the cfg that is fully covered by the given points, i.e. only edges that are
+//    /// connecting pints in the set are considered.
+//    fn find_start_points(&self, points: &Vec<PointIndex>) -> Vec<PointIndex> {
+//        points.iter().filter(|&challenge|
+//            ! self.all_facts.cfg_edge.iter().any(|&(p, q)|
+//                q == *challenge &&
+//                    points.contains(&p)
+//            )
+//        ).map(|&p| p).collect()
+//    }
 
-    /// finds all regions in the outlives (available as field of the struct) that are directly
-    /// following the region given as start.
-    fn find_next_regions(&self, start: Region)
-                         -> Vec<Region> {
-        self.outlives.iter().filter(|&(r1, r2, _)|
-            *r1 == start
-        ).map(|&(_, r2, _)| r2).collect()
-    }
+//    /// finds all regions in the outlives (available as field of the struct) that are directly
+//    /// following the region given as start.
+//    fn find_next_regions(&self, start: Region)
+//                         -> Vec<Region> {
+//        self.outlives.iter().filter(|&(r1, r2, _)|
+//            *r1 == start
+//        ).map(|&(_, r2, _)| r2).collect()
+//    }
 
     /// finds all regions in the outlives (available as field of the struct) that are directly
     /// before the region given as start.
@@ -544,34 +566,34 @@ impl <'epf> ErrorPathFinder<'epf> {
         ).map(|&(r1, _, _)| r1).collect()
     }
 
-    /// Returns true if there is a point P in points such that this point P is bigger then cmp
-    /// (where bigger means that it is later in the program flow then then previous one)
-    /// NOTE: For now, points are simply compared by their index
-    fn has_bigger_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
-        points.iter().filter(|&p|
-            self.is_later_in_program_or_eq(*p, cmp)
-        ).count() > 0
-    }
+//    /// Returns true if there is a point P in points such that this point P is bigger then cmp
+//    /// (where bigger means that it is later in the program flow then then previous one)
+//    /// NOTE: For now, points are simply compared by their index
+//    fn has_bigger_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
+//        points.iter().filter(|&p|
+//            self.is_later_in_program_or_eq(*p, cmp)
+//        ).count() > 0
+//    }
 
-    /// check if goal is later in the cfg (given as part of all_facts, that is available as a filed)
-    /// then start, or at the same point
-    fn is_later_in_program_or_eq(&self, goal: PointIndex, start: PointIndex) -> bool {
-        goal == start ||
-            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
-                *p == start && *q == goal
-            ).count() > 0 ||
-            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
-                *p == start && self.is_later_in_program_or_eq(goal, *q)
-            ).count() > 0
-    }
+//    /// check if goal is later in the cfg (given as part of all_facts, that is available as a filed)
+//    /// then start, or at the same point
+//    fn is_later_in_program_or_eq(&self, goal: PointIndex, start: PointIndex) -> bool {
+//        goal == start ||
+//            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
+//                *p == start && *q == goal
+//            ).count() > 0 ||
+//            self.all_facts.cfg_edge.iter().filter(|&(p, q)|
+//                *p == start && self.is_later_in_program_or_eq(goal, *q)
+//            ).count() > 0
+//    }
 
-    /// Returns true if there is a point P in points such that this point P is smaller then cmp
-    /// (where smaller means that it is earlier in the program flow then then previous one)
-    /// NOTE: For now, points are simply compared by their index
-    fn has_smaller_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
-        // TODO does (presumably) simply compare points by their index, as usize. No idea if this makes any sense or is any good.
-        points.iter().filter(|&p| *p < cmp).count() > 0
-    }
+//    /// Returns true if there is a point P in points such that this point P is smaller then cmp
+//    /// (where smaller means that it is earlier in the program flow then then previous one)
+//    /// NOTE: For now, points are simply compared by their index, this might be nonsense.
+//    fn has_smaller_point(&self, points: &Vec<PointIndex>, cmp: PointIndex) -> bool {
+//        // TODO does (presumably) simply compare points by their index, as usize. No idea if this makes any sense or is any good.
+//        points.iter().filter(|&p| *p < cmp).count() > 0
+//    }
 
     /// This function finds all loans that belong to a certain region as given by the
     /// all_facts.borrow_region input. (Is available in self)
@@ -585,13 +607,23 @@ impl <'epf> ErrorPathFinder<'epf> {
         ).map(|&(_, l, _)| l).collect()
     }
 
+    /// This method does implement the (recursive) traversal of the graph described by the outlives
+    /// relation (given as self.outlives), and thereby tries to find a path from the Region given as
+    /// `start` to a region that includes the error loan/borrow.
+    /// The search is (for now) implemented in a depth-first traversal, and the first path that
+    /// leads to a region that fulfills the criterion is taken. This graph is then returned as
+    /// the out-parameter cur_path.
+    /// In addition, the method returns true if it did succeed in finding a path that fulfills the
+    /// termination criterion. If non was fround, false is returned and the content of cur_path is
+    /// not altered. (The behaviour regarding cur_path in the error case might change in the future,
+    /// e.g. for the sake of performance.)
     fn path_to_error_backwards(&self, start: Region, mut cur_path: &mut Vec<Region>)
                                -> bool {
-        let points_of_cur_region: Vec<PointIndex> = self.points_of_region(start);
-        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
+//        let points_of_cur_region: Vec<PointIndex> = self.points_of_region(start);
+//        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
         debug!("cur_region (start): {:?}", start);
-        debug!("points_of_cur_region: {:?}", points_of_cur_region);
-        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
+//        debug!("points_of_cur_region: {:?}", points_of_cur_region);
+//        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
 
         // add start to the path, as it will now become part of it.
         cur_path.push(start);
