@@ -53,7 +53,8 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
                 _b: hir::BodyId, _s: syntax_pos::Span, hir_id: hir::HirId) {
         let name = match fk {
             intravisit::FnKind::ItemFn(name, ..) => name,
-            _ => return, // Do not skip here if it is a method, but handle methods as well (get name etc.)
+            intravisit::FnKind::Method(name, ..) => name,
+            _ => return, // skip anything else (right now, this seems to include only closures), since we do not know to handle it. (Dealing with closures is deferred for now.)
         };
 
         trace!("[visit_fn] enter name={:?}", name);
@@ -423,7 +424,7 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// The method that does run the entire path computation, using the information that is provided
     /// by the fields of the struct instance it is called on. Best call this after initiation a
     /// struct instance with the provided constructor.
-    /// Note that this method will change some of the fields of the struct, and it is not forseen
+    /// Note that this method will change some of the fields of the struct, and it is not intended
     /// to run this method more then once on the same struct instance. (This might work, but it was
     /// never tested and no guarantees are provided.) I.e. it is not guaranteed that this method
     /// is idempotent with respect to the struct and it's result.
@@ -431,12 +432,15 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// This gives a simple, portable and unique representation of the found path. However, please
     /// note that the path is given in backwards direction. I.e. the first element of the vector
     /// it the last of the path in the outlives relation (graph).
-    /// When no such path is found an empty vector (Vec::default()) is returned. However, it is not
-    /// clear to the author (as of now) if this can even happen at all if only valid, non-modified
-    /// inputs form the rustc compiler (currently used version) and the (naive) Polonius are
-    /// provided to the constructor. (At least the author thinks that he did not find a input that
-    /// led to such a behaviour as of now.) If such a case will occur, this method will print a
-    /// warning to the log.
+    /// When no such path is found an empty vector (Vec::default()) is returned. In this case the
+    /// this method will print also a warning to the log. (Since this did never happen while
+    /// testing as of now.)
+    /// Sometimes also the search for the starting region fails. In this case, also an empty vector
+    /// (Vec::default()) is returned, but this does not cause a warning. (As this seems to happen
+    /// under some circumstances, especially when multiple errors are found in the input program.)
+    /// Especially, for some programs Polunius finds several points for an error. In this case one
+    /// should try all as inupt for the path search, as sometimes not all do lead to a successful
+    /// search. (For some no starting region is found.)
     fn compute_error_path(&mut self) -> Vec<Region> {
         trace!("[compute_error_path] enter");
 
@@ -468,11 +472,15 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         debug!("requires, after adding elements from output.restricts : {:?}", requires);
 
-        let (error_region, error_loan_var) = requires.iter().filter(|&(r, l, p)|
+        let error_region_loan_opt = requires.iter().filter(|&(r, l, p)|
             *p == self.error_fact.0 &&
                 loans_invalidated_by_error.contains(l) &&
                 regions_life_at_error.contains(r)
-        ).map(|&(r, l, _)| (r, l)).next().unwrap();
+        ).map(|&(r, l, _)| (r, l)).next();
+        let (error_region, error_loan_var) = match error_region_loan_opt {
+            Some(error_descr) => error_descr,
+            None => return Vec::default(),
+        };
         self.error_loan = error_loan_var;
 
         debug!("error_point: {:?}", self.error_fact.0);
@@ -773,7 +781,12 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                                                              &self.borrowck_out_facts,
                                                              (*err_point_ind, err_loans.clone()),
                                                              &self.borrowck_in_facts.outlives);
-            path_to_explain_last_error = error_path_finder.compute_error_path();
+            let new_path = error_path_finder.compute_error_path();
+            if ! new_path.is_empty() {
+                // if the newly found path is non-empty, take it. This prevents that a path that was
+                // found before is overwritten by an emtpy (error result)
+                path_to_explain_last_error = new_path;
+            }
         }
 
         let mut outlives_at: FxHashMap<(Region, Region), Vec<PointIndex>>;
