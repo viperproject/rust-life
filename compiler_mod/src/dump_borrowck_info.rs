@@ -49,8 +49,13 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         intravisit::NestedVisitorMap::All(map)
     }
 
-    fn visit_fn(&mut self, fk: intravisit::FnKind<'tcx>, _fd: &'tcx hir::FnDecl,
-                _b: hir::BodyId, _s: syntax_pos::Span, hir_id: hir::HirId) {
+    fn visit_fn(&mut self, fk: intravisit::FnKind<'tcx>, fd: &'tcx hir::FnDecl,
+                b: hir::BodyId, s: syntax_pos::Span, hir_id: hir::HirId) {
+        // call walk_fn with all received parameters. This is what the default would do, and
+        // required to also process all content of the function (and thereby eventually also handle
+        // inner (nested) functions.
+        intravisit::walk_fn(self, fk, fd, b, s, hir_id);
+
         let name = match fk {
             intravisit::FnKind::ItemFn(name, ..) => name,
             intravisit::FnKind::Method(name, ..) => name,

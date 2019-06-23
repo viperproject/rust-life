@@ -7,8 +7,8 @@
 // This example is specific for error E0502. (example 0)
 // NOTE: The original example was slightly extended (add take function and call it in the end) in order to ensure that
 // the desired error does still occur, even when using NLL. (Rust edition 2018)
-// NOTE: All methods were moved out of the main function to make this example working with the current version (as of 
-// 19.06.2019) of our tool that apparently does not handle inner methods at all.
+// NOTE: All methods were moved out of the main function to make this example working with a previous version (before 
+// 22.06.2019) of our tool that apparently did not handle inner methods at all.
 
 #![allow(unused)]
 fn main() {
