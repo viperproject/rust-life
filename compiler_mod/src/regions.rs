@@ -18,6 +18,10 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     trace!("[enter] load_variable_regions(path={:?})", path);
     let mut variable_regions = HashMap::new();
     let file = File::open(path)?;
+    // This (all remaining code of this function) is not fully correct, it seems to not read all regions
+    // that are associated with some locals. E.g "local 4 rvid 16" is not emitted for find_error_path_ex0.rs,
+    // but it seems to be in the mir quite clearly and it would probably improve the final result if it would be
+    // returned by this function.
     let fn_sig = Regex::new(r"^fn [a-zA-Z\d_]+\((?P<args>.*)\) -> (?P<result>.*)\{$").unwrap();
     let arg = Regex::new(r"^_(?P<local>\d+): &'_#(?P<rvid>\d+)r (mut)? [a-zA-Z\d_]+\s*$").unwrap();
     let local = Regex::new(r"^\s+(let )?(mut )?_(?P<local>\d+): &'_#(?P<rvid>\d+)r ").unwrap();

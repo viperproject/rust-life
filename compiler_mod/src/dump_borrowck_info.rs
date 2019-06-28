@@ -893,7 +893,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let mut local_name1 = String::default();
             let mut local_name2 = String::default();
             let mut local_source1 = syntax_pos::DUMMY_SP;
-            let mut local_source2;
+            let mut local_source2 = syntax_pos::DUMMY_SP;
             let mut fm_ln1;
             let mut fm_ln2;
             let mut local_source1_line = usize::default();
@@ -936,10 +936,27 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                     let local_decl = &self.mir.local_decls[*local_x];
                     if local_decl.name != None {
                         local_name2 = local_decl.name.unwrap().to_string();
+                        local_source2 = local_decl.source_info.span;
                     } else {
                         local_name2 = ("anonymous Variable").to_string();
+                        for block_data in self.mir.basic_blocks().iter(){
+                            for stmt in block_data.statements.iter(){
+                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                                    match l.local() {
+                                        Some(v) => if v==*local_x{
+                                            local_source2 = stmt.source_info.span;
+                                        }
+
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
                     }
-                    local_source2 = local_decl.source_info.span;
+//                    } else {
+//                        local_name2 = ("anonymous Variable").to_string();
+//                    }
+//                    local_source2 = local_decl.source_info.span;
                     fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
                     local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
                     //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;

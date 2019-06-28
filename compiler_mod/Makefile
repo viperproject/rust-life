@@ -15,8 +15,7 @@ run:
 	RUST_LOG=${LOG_LEVEL} \
 	LD_LIBRARY_PATH=${LIB_PATH} \
 	${DRIVER} \
-		-L ${COMPILER_PATH}/lib/rustlib/x86_64-unknown-linux-gnu/lib/ \
-		--extern prusti_contracts=$(wildcard ../target/debug/deps/libprusti_contracts-*.rlib) \
+		--sysroot ${COMPILER_PATH} \
 		-Z dump-mir-graphviz \
 		${RUN_FILE}
 	#dot -Tpdf graph.dot -O
