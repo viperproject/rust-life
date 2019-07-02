@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use self::polonius_engine::{Algorithm, Output};
 use rustc::hir::{self, intravisit};
 use rustc::mir;
+use rustc::ty;
 use rustc::ty::TyCtxt;
 use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
@@ -74,6 +75,9 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         };
 
         let def_id = self.tcx.hir().local_def_id_from_hir_id(hir_id);
+        // This trial was disabled (and the old version that comes later in the code was re-enabled) too keep the old version working in a fully consistent way for now.
+        //let mir = self.tcx.mir_built(def_id).borrow().clone();
+
         self.tcx.mir_borrowck(def_id);
 
         // Read Polonius facts.
@@ -95,7 +99,7 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 
         println!("errors: {:?}", output.errors);
 
-
+        // This was disabled before (isteand, an "older" version of mir was read from tcx before), but was re-enabled now to keep the old code work in a consistent way for now.
         let mir = self.tcx.mir_validated(def_id).borrow();
 
         let graph_path = PathBuf::from("nll-facts")
@@ -114,9 +118,12 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
             borrowck_out_facts: output,
             interner: interner,
 			variable_regions: variable_regions,
+            region_to_local_map: HashMap::new(),
             def_path: def_path,
         };
         mir_info_printer.print_info();
+
+        debug!("[visit_fn] ----------> Done with handling function {:?} <----------", name);
 
         trace!("[visit_fn] exit");
     }
@@ -748,10 +755,15 @@ impl <'epf> ErrorPathFinder<'epf> {
 struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
     pub mir: cell::Ref<'a, mir::Mir<'tcx>>,
+//    pub mir: mir::Mir<'tcx>,
     pub borrowck_in_facts: facts::AllInputFacts,
     pub borrowck_out_facts: facts::AllOutputFacts,
     pub interner: facts::Interner,
 	pub variable_regions: HashMap<mir::Local, Region>,
+    /// This gives the mapping from regions to the locals that introduced them. This field does not
+    /// need to be set when the stuct is created, but will be filled by calling the method
+    /// compute_region_to_local_map in print_error.
+    pub region_to_local_map: HashMap<Region, mir::Local>,
     pub def_path: rustc::hir::map::DefPath,
 }
 
@@ -762,7 +774,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         Ok(())
     }
 
-    fn print_error(&self) {
+    fn print_error(&mut self) {
         let mut expl_output = ExplOutput::new();
 
         let mut path_to_explain_last_error: Vec<Region> = Vec::default();
@@ -841,6 +853,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             debug!("graph_to_explain_last_error: {:?}", graph_to_explain_last_error);
 
+            self.region_to_local_map = self.compute_region_to_local_map();
+            debug!("region_to_local_map: {:?}", self.region_to_local_map);
+
             let error_graph_path = PathBuf::from("nll-facts")
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("error_graph.dot");
@@ -851,7 +866,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let expl_graph_path = PathBuf::from("nll-facts")
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("outlive_graph.dot");
-        self.print_outlive_error_graph(&outlives_at, &expl_graph_path);
+        self.print_outlive_error_graph_legacy(&outlives_at, &expl_graph_path);
     }
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
@@ -867,7 +882,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// must give a complete path to a file, either relative to the working directory or as absolute
     /// path, and it must also contain the file name. Note that any file that already exists at this
     /// location will be overwritten.
-    fn print_outlive_error_graph(&self,
+    /// WARNING: This is the legacy method that uses the old method(s) for matching regions and
+    /// constraints to source lines and locals. This is only kept for testing and showcasing the new
+    /// method an will be removed soon.
+    fn print_outlive_error_graph_legacy(&self,
                                  outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
                                  graph_out_path: &PathBuf) {
 
@@ -1019,6 +1037,217 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
 
         writeln!(outlive_graph, "}}");
+    }
+
+    /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
+    /// intended to describe a lifetime error in a program or it is an outlives graph (of some
+    /// portion) of a Rust program. During the printing process, the graph is also enriched with
+    /// some information from the program (e.g. source lines) that shall help to understand it and
+    /// to associate it with the program it originates form.
+    /// The graph that shall be printed is given as an FxHashMap that maps from a tuple of regions
+    /// to a vector of points. Note that the actual graph is described by the tuples that are used
+    /// as keys. These tuples describe the edges of the graph. The points only provided additional
+    /// information about where (in the program) these edges arise.
+    /// The path to which the graph that will be written is given by the PathBuf graph_out_path. It
+    /// must give a complete path to a file, either relative to the working directory or as absolute
+    /// path, and it must also contain the file name. Note that any file that already exists at this
+    /// location will be overwritten.
+    /// NOTE: This is the new version that will use new ways to find the locals and source lines
+    /// that are relevant for regions and constraints.
+    /// WARNING: This method may only be called after self.region_to_local_map was set.
+    fn print_outlive_error_graph(&self,
+                                outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
+                                graph_out_path: &PathBuf) {
+
+        let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
+
+        writeln!(outlive_graph, "digraph G {{");
+
+        let mut regions_done = Vec::new();
+
+        for ((region1, region2), points) in outlives_at.iter() {
+            if regions_done.contains(&(((region2, region1), points), 0)) {
+                regions_done.remove_item(&(((region2, region1), points), 0));
+                regions_done.push((((region2, region1), points), 1))
+            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
+                regions_done.push((((region1, region2), points), 0));
+            }
+
+        }
+
+        let mut i = 0;
+
+        for (((region1, region2), points), eq) in regions_done.iter() {
+            let mut local_name1 = String::default();
+            let mut local_name2 = String::default();
+            let mut local_source1 = syntax_pos::DUMMY_SP;
+            let mut local_source2 = syntax_pos::DUMMY_SP;
+            let mut fm_ln1;
+            let mut fm_ln2;
+            let mut local_source1_line = usize::default();
+            let mut local_source2_line= usize::default();
+            let mut local_source1_snip = String::default();
+            let mut local_source2_snip= String::default();
+            let mut point_ln;
+            let mut point_snip = String::default();
+            //let mut anonym1_snip;
+
+            for (local_x, rv) in self.variable_regions.iter() {
+                if *region1 == rv {
+                    let local_decl = &self.mir.local_decls[*local_x];
+                    if local_decl.name != None {
+                        local_name1 = local_decl.name.unwrap().to_string();
+                        local_source1 = local_decl.source_info.span;
+                    } else {
+                        local_name1 = ("anonymous Variable").to_string();
+                        for block_data in self.mir.basic_blocks().iter(){
+                            for stmt in block_data.statements.iter(){
+                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                                    match l.local() {
+                                        Some(v) => if v==*local_x{
+                                            local_source1 = stmt.source_info.span;
+                                        }
+
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
+                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
+                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
+                }
+                else if *region2 == rv {
+                    let local_decl = &self.mir.local_decls[*local_x];
+                    if local_decl.name != None {
+                        local_name2 = local_decl.name.unwrap().to_string();
+                        local_source2 = local_decl.source_info.span;
+                    } else {
+                        local_name2 = ("anonymous Variable").to_string();
+                        for block_data in self.mir.basic_blocks().iter(){
+                            for stmt in block_data.statements.iter(){
+                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                                    match l.local() {
+                                        Some(v) => if v==*local_x{
+                                            local_source2 = stmt.source_info.span;
+                                        }
+
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+//                    } else {
+//                        local_name2 = ("anonymous Variable").to_string();
+//                    }
+//                    local_source2 = local_decl.source_info.span;
+                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
+                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
+                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
+                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+                }
+            }
+
+            let mut points_sort = points.clone();
+            //println!("points {:?}: {:?}", i, points_sort);
+            let mut ind = usize::max_value();
+            //let mut point_x = self.interner.get_point(points_sort[0]);
+            //println!("unsirted: {:?}",points_sort);
+            for point in points_sort.iter(){
+                let point1 = self.interner.get_point(*point);
+                let point_location = point1.location;
+                let point_block = &self.mir[point_location.block];
+                let point_span;
+                if point_block.statements.len() == point_location.statement_index{
+                    let terminator = point_block.terminator.as_ref().unwrap();
+                    point_span = terminator.source_info.span;
+                }else {
+                    let stmt_x = &point_block.statements[point_location.statement_index];
+                    point_span = stmt_x.source_info.span;
+                }
+                let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
+                if point_line < ind {
+                    ind = point_line;
+                    point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
+                    point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
+                }
+
+            }
+
+            if local_source1_snip != String::default(){
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            }else {
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
+            }
+            if local_source2_snip != String::default(){
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            }else {
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
+            }
+
+
+            if *eq==0 {
+
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
+            }
+
+            if *eq==1 {
+                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} and {:?}  may point to each other </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
+                writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
+            }
+
+            i += 1;
+        }
+
+
+        writeln!(outlive_graph, "}}");
+    }
+
+    /// Method that produces a mpp that links regions to the locals that introduces this region.
+    /// This information is read from the MIR that is avilabel as part of self, or more exactly,
+    /// from the type information in the MIR.
+    /// This map is returned (And can be used to set self.region_to_local_map)
+    fn compute_region_to_local_map(&mut self) -> HashMap<Region, mir::Local> {
+        let mut result = HashMap::new();
+        debug!("MIR phase: {:?}", self.mir.phase);
+
+        for (local, local_decl) in self.mir.local_decls.iter_enumerated() {
+            debug!("local: {:?}, local_decl: {:?}", local, local_decl);
+            let mut locals_regions: Vec<ty::Region> = Vec::new();
+            for local_ty in local_decl.ty.walk() {
+                match local_ty.sty {
+                    ty::Ref(reg, _, _) => locals_regions.push(reg),
+                    ty::Adt(_, substs_ref) => {
+                        for reg in substs_ref.regions() {
+                            locals_regions.push(reg);
+                        }
+                    },
+                    ty::RawPtr(_) => debug!("Hit ty::RawPtr!!!"),
+                    // TODO handle more options, probably ADT is needed, maybe even more (but ev. only for special/corner cases)
+                    _ => {}
+                }
+            }
+            debug!("locals_regions: {:?}", locals_regions);
+            for reg in locals_regions {
+//                let fact_reg = match reg {
+//                    ty::ReVar(vid) => Region::from(vid.index()),
+//                    ty::ReScope(scope) => Region::from(scope.id.index()),
+//                    _ => continue,
+//                    // TODO maybe need to cover more variants, it is not clear as of now which are needed.
+//                };
+                //let fact_reg = Region::from(format!("{}", reg));
+                debug!("{}", reg);
+                //result.insert(fact_reg, local);
+            }
+        }
+
+        result
     }
 }
 
