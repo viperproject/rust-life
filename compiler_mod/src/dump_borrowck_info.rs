@@ -110,6 +110,10 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
 
         let interner = facts_loader.interner;
 
+        let region_to_local_map = regions::load_region_to_local_map(&renumber_path).expect("Error reading mir dump file!");
+
+        debug!("region_to_local_map: {:?}", region_to_local_map);
+
 
         let mut mir_info_printer = MirInfoPrinter {
             tcx: self.tcx,
@@ -118,7 +122,7 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
             borrowck_out_facts: output,
             interner: interner,
 			variable_regions: variable_regions,
-            region_to_local_map: HashMap::new(),
+            region_to_local_map,
             def_path: def_path,
         };
         mir_info_printer.print_info();
@@ -760,9 +764,8 @@ struct MirInfoPrinter<'a, 'tcx: 'a> {
     pub borrowck_out_facts: facts::AllOutputFacts,
     pub interner: facts::Interner,
 	pub variable_regions: HashMap<mir::Local, Region>,
-    /// This gives the mapping from regions to the locals that introduced them. This field does not
-    /// need to be set when the stuct is created, but will be filled by calling the method
-    /// compute_region_to_local_map in print_error.
+    /// This gives the mapping from regions to the locals that introduced them.
+    /// This information can be read form a MIR dump by the method regions::load_region_to_local_map
     pub region_to_local_map: HashMap<Region, mir::Local>,
     pub def_path: rustc::hir::map::DefPath,
 }
@@ -853,7 +856,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             debug!("graph_to_explain_last_error: {:?}", graph_to_explain_last_error);
 
-            self.region_to_local_map = self.compute_region_to_local_map();
             debug!("region_to_local_map: {:?}", self.region_to_local_map);
 
             let error_graph_path = PathBuf::from("nll-facts")
@@ -1213,41 +1215,58 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// This information is read from the MIR that is avilabel as part of self, or more exactly,
     /// from the type information in the MIR.
     /// This map is returned (And can be used to set self.region_to_local_map)
-    fn compute_region_to_local_map(&mut self) -> HashMap<Region, mir::Local> {
-        let mut result = HashMap::new();
-        debug!("MIR phase: {:?}", self.mir.phase);
+    /// NOTE: This method does not work successfully, since the version of MIR that is available does
+    /// not contain all needed information. More specifically, the region "names" in this MIR version
+    /// are no longer existing in the form that they were when borrowchking, and therefore the mapping
+    /// from facts::Regions to the regions in the MIR will not succeed.
+    /// Therefore go back to parsing a dump of MIR that does contain this needed information.
+//    fn compute_region_to_local_map(&mut self) -> HashMap<Region, mir::Local> {
+//        let mut result = HashMap::new();
+//        debug!("MIR phase: {:?}", self.mir.phase);
+//
+//        for (local, local_decl) in self.mir.local_decls.iter_enumerated() {
+//            debug!("local: {:?}, local_decl: {:?}", local, local_decl);
+//            let mut locals_regions: Vec<ty::Region> = Vec::new();
+//            for local_ty in local_decl.ty.walk() {
+//                match local_ty.sty {
+//                    ty::Ref(reg, _, _) => locals_regions.push(reg),
+//                    ty::Adt(_, substs_ref) => {
+//                        for reg in substs_ref.regions() {
+//                            locals_regions.push(reg);
+//                        }
+//                    },
+//                    ty::RawPtr(_) => debug!("Hit ty::RawPtr!!!"),
+//                    // TODO handle more options, probably ADT is needed, maybe even more (but ev. only for special/corner cases)
+//                    _ => {}
+//                }
+//            }
+//            debug!("locals_regions: {:?}", locals_regions);
+//            for reg in locals_regions {
+////                let fact_reg = match reg {
+////                    ty::ReVar(vid) => Region::from(vid.index()),
+////                    ty::ReScope(scope) => Region::from(scope.id.index()),
+////                    _ => continue,
+////                    // TODO maybe need to cover more variants, it is not clear as of now which are needed.
+////                };
+//                //let fact_reg = Region::from(format!("{}", reg));
+//                debug!("{}", reg);
+//                //result.insert(fact_reg, local);
+//            }
+//        }
+//
+//        result
+//    }
 
-        for (local, local_decl) in self.mir.local_decls.iter_enumerated() {
-            debug!("local: {:?}, local_decl: {:?}", local, local_decl);
-            let mut locals_regions: Vec<ty::Region> = Vec::new();
-            for local_ty in local_decl.ty.walk() {
-                match local_ty.sty {
-                    ty::Ref(reg, _, _) => locals_regions.push(reg),
-                    ty::Adt(_, substs_ref) => {
-                        for reg in substs_ref.regions() {
-                            locals_regions.push(reg);
-                        }
-                    },
-                    ty::RawPtr(_) => debug!("Hit ty::RawPtr!!!"),
-                    // TODO handle more options, probably ADT is needed, maybe even more (but ev. only for special/corner cases)
-                    _ => {}
-                }
-            }
-            debug!("locals_regions: {:?}", locals_regions);
-            for reg in locals_regions {
-//                let fact_reg = match reg {
-//                    ty::ReVar(vid) => Region::from(vid.index()),
-//                    ty::ReScope(scope) => Region::from(scope.id.index()),
-//                    _ => continue,
-//                    // TODO maybe need to cover more variants, it is not clear as of now which are needed.
-//                };
-                //let fact_reg = Region::from(format!("{}", reg));
-                debug!("{}", reg);
-                //result.insert(fact_reg, local);
-            }
-        }
+    fn get_lines_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
+            -> Vec<(usize, String)>{
+        let mut result: Vec<(usize, String)> = Vec::new();
 
         result
+    }
+
+    fn get_points_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
+            -> Vec<PointIndex> {
+        map.iter().filter(|&(r, _, _)| *r == reg).map(|(_, _, p)| *p).collect()
     }
 }
 

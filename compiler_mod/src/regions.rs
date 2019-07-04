@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
+use std::thread::LocalKey;
 
 pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, facts::Region>> {
     trace!("[enter] load_variable_regions(path={:?})", path);
@@ -61,4 +62,26 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     }
     trace!("[exit] load_variable_regions");
     Ok(variable_regions)
+}
+
+pub fn load_region_to_local_map(path: &Path) -> io::Result<HashMap<facts::Region, mir::Local>> {
+    let mut result: HashMap<facts::Region, mir::Local> = HashMap::new();
+
+    let variable_definition = Regex::new(r"^\s+let (mut )?_(?P<local>\d+): (?P<type>.+)$").unwrap();
+    let region_name = Regex::new(r"'_#(\d+)r").unwrap();
+
+    let file = File::open(path)?;
+    for line in io::BufReader::new(file).lines() {
+        let line = line?;
+        if let Some(variable_definition_caps) = variable_definition.captures(&line) {
+            let local: usize = (&variable_definition_caps["local"]).parse().unwrap();
+            let type_str = (&variable_definition_caps["type"]);
+            for cap_reg in region_name.captures_iter(type_str) {
+                let region: usize = (&cap_reg[1]).parse().unwrap();
+                result.insert(region.into(), mir::Local::new(local));
+            }
+
+        }
+    }
+    Ok(result)
 }
