@@ -858,6 +858,12 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             debug!("region_to_local_map: {:?}", self.region_to_local_map);
 
+            let old_error_graph_path = PathBuf::from("nll-facts")
+                .join(self.def_path.to_filename_friendly_no_crate())
+                .join("old_error_graph.dot");
+
+            self.print_outlive_error_graph_legacy(&graph_to_explain_last_error, &old_error_graph_path);
+
             let error_graph_path = PathBuf::from("nll-facts")
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("error_graph.dot");
@@ -886,7 +892,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// location will be overwritten.
     /// WARNING: This is the legacy method that uses the old method(s) for matching regions and
     /// constraints to source lines and locals. This is only kept for testing and showcasing the new
-    /// method an will be removed soon.
+    /// method an will be removed soon. In addition, it will also print reflexive relations in a
+    /// special way that was intended to emphasize that regions connected by reflexive edges are
+    /// considered as being equal.
     fn print_outlive_error_graph_legacy(&self,
                                  outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
                                  graph_out_path: &PathBuf) {
@@ -1055,103 +1063,161 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// path, and it must also contain the file name. Note that any file that already exists at this
     /// location will be overwritten.
     /// NOTE: This is the new version that will use new ways to find the locals and source lines
-    /// that are relevant for regions and constraints.
-    /// WARNING: This method may only be called after self.region_to_local_map was set.
+    /// that are relevant for regions and constraints. Also, it will no longer check if two regions
+    /// are "equal" (edge from both to each other) and hence no longer print reflexive edges in a
+    /// special way, since such edges do no longer exist in the error path graph. (As this graph
+    /// describes a single-direction path, that is part of the outlives relation graph.)
     fn print_outlive_error_graph(&self,
-                                outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
+                                graph_information: &FxHashMap<(Region, Region), Vec<PointIndex>>,
                                 graph_out_path: &PathBuf) {
 
         let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
 
         writeln!(outlive_graph, "digraph G {{");
 
-        let mut regions_done = Vec::new();
-
-        for ((region1, region2), points) in outlives_at.iter() {
-            if regions_done.contains(&(((region2, region1), points), 0)) {
-                regions_done.remove_item(&(((region2, region1), points), 0));
-                regions_done.push((((region2, region1), points), 1))
-            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
-                regions_done.push((((region1, region2), points), 0));
-            }
-
-        }
+//        let mut regions_done = Vec::new();
+//
+//        for ((region1, region2), points) in outlives_at.iter() {
+//            if regions_done.contains(&(((region2, region1), points), 0)) {
+//                regions_done.remove_item(&(((region2, region1), points), 0));
+//                regions_done.push((((region2, region1), points), 1))
+//            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
+//                regions_done.push((((region1, region2), points), 0));
+//            }
+//
+//        }
 
         let mut i = 0;
 
-        for (((region1, region2), points), eq) in regions_done.iter() {
+        for ((region1, region2), points) in graph_information.iter() {
             let mut local_name1 = String::default();
             let mut local_name2 = String::default();
             let mut local_source1 = syntax_pos::DUMMY_SP;
             let mut local_source2 = syntax_pos::DUMMY_SP;
-            let mut fm_ln1;
-            let mut fm_ln2;
-            let mut local_source1_line = usize::default();
-            let mut local_source2_line= usize::default();
+//            let mut fm_ln1;
+//            let mut fm_ln2;
             let mut local_source1_snip = String::default();
             let mut local_source2_snip= String::default();
             let mut point_ln;
             let mut point_snip = String::default();
             //let mut anonym1_snip;
 
-            for (local_x, rv) in self.variable_regions.iter() {
-                if *region1 == rv {
-                    let local_decl = &self.mir.local_decls[*local_x];
-                    if local_decl.name != None {
-                        local_name1 = local_decl.name.unwrap().to_string();
-                        local_source1 = local_decl.source_info.span;
-                    } else {
-                        local_name1 = ("anonymous Variable").to_string();
-                        for block_data in self.mir.basic_blocks().iter(){
-                            for stmt in block_data.statements.iter(){
-                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                    match l.local() {
-                                        Some(v) => if v==*local_x{
-                                            local_source1 = stmt.source_info.span;
-                                        }
-
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
-                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
-                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
-                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
-                }
-                else if *region2 == rv {
-                    let local_decl = &self.mir.local_decls[*local_x];
-                    if local_decl.name != None {
-                        local_name2 = local_decl.name.unwrap().to_string();
-                        local_source2 = local_decl.source_info.span;
-                    } else {
-                        local_name2 = ("anonymous Variable").to_string();
-                        for block_data in self.mir.basic_blocks().iter(){
-                            for stmt in block_data.statements.iter(){
-                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                    match l.local() {
-                                        Some(v) => if v==*local_x{
-                                            local_source2 = stmt.source_info.span;
-                                        }
-
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
+//            for (local_x, rv) in self.variable_regions.iter() {
+//                if *region1 == rv {
+//                    let local_decl = &self.mir.local_decls[*local_x];
+//                    if local_decl.name != None {
+//                        local_name1 = local_decl.name.unwrap().to_string();
+//                        local_source1 = local_decl.source_info.span;
+//                    } else {
+//                        local_name1 = ("anonymous Variable").to_string();
+//                        for block_data in self.mir.basic_blocks().iter(){
+//                            for stmt in block_data.statements.iter(){
+//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+//                                    match l.local() {
+//                                        Some(v) => if v==*local_x{
+//                                            local_source1 = stmt.source_info.span;
+//                                        }
+//
+//                                        _ => {}
+//                                    }
+//                                }
+//                            }
+//                        }
+//                    }
+//
+//                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
+//                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+//                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
+//                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
+//                }
+//                else if *region2 == rv {
+//                    let local_decl = &self.mir.local_decls[*local_x];
+//                    if local_decl.name != None {
+//                        local_name2 = local_decl.name.unwrap().to_string();
+//                        local_source2 = local_decl.source_info.span;
 //                    } else {
 //                        local_name2 = ("anonymous Variable").to_string();
+//                        for block_data in self.mir.basic_blocks().iter(){
+//                            for stmt in block_data.statements.iter(){
+//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+//                                    match l.local() {
+//                                        Some(v) => if v==*local_x{
+//                                            local_source2 = stmt.source_info.span;
+//                                        }
+//
+//                                        _ => {}
+//                                    }
+//                                }
+//                            }
+//                        }
 //                    }
-//                    local_source2 = local_decl.source_info.span;
-                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
-                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
-                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
-                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+////                    } else {
+////                        local_name2 = ("anonymous Variable").to_string();
+////                    }
+////                    local_source2 = local_decl.source_info.span;
+//                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
+//                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
+//                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
+//                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+//                }
+//            }
+
+            if let Some(local_x1) = self.region_to_local_map.get(region1) {
+                // there is a local (x) for region one, get some details about it
+                // (code copied from the old version)
+                let local_decl = &self.mir.local_decls[*local_x1];
+                if local_decl.name != None {
+                    local_name1 = local_decl.name.unwrap().to_string();
+                    local_source1 = local_decl.source_info.span;
+                } else {
+                    local_name1 = ("anonymous Variable").to_string();
+                    for block_data in self.mir.basic_blocks().iter() {
+                        for stmt in block_data.statements.iter() {
+                            if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                                match l.local() {
+                                    Some(v) => if v==*local_x1 {
+                                        local_source1 = stmt.source_info.span;
+                                    }
+
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                 }
+                let fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
+                local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+            } else {
+                debug!("No locale (and hence no extra details) found for region1={:?}", region1);
+            }
+
+            if let Some(local_x2) = self.region_to_local_map.get(region2) {
+                // there is a local (x) for region tow, get some details about it
+                // (code copied from the old version)
+                let local_decl = &self.mir.local_decls[*local_x2];
+                if local_decl.name != None {
+                    local_name2 = local_decl.name.unwrap().to_string();
+                    local_source2 = local_decl.source_info.span;
+                } else {
+                    local_name2 = ("anonymous Variable").to_string();
+                    for block_data in self.mir.basic_blocks().iter() {
+                        for stmt in block_data.statements.iter() {
+                            if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                                match l.local() {
+                                    Some(v) => if v==*local_x2{
+                                        local_source2 = stmt.source_info.span;
+                                    }
+
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                let fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
+                local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
+            } else {
+                debug!("No locale (and hence no extra details) found for region2={:?}", region2);
             }
 
             let mut points_sort = points.clone();
@@ -1191,18 +1257,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
             }
 
-
-            if *eq==0 {
-
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-                writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
-            }
-
-            if *eq==1 {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} and {:?}  may point to each other </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
-                writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
-            }
+            // write the box (graph node)  with the constraint information, and the edges around it.
+            writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
 
             i += 1;
         }

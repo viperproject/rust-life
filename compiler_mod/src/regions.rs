@@ -15,6 +15,8 @@ use std::io::{self, BufRead};
 use std::path::Path;
 use std::thread::LocalKey;
 
+/// This function is deprecated, and actually also bugous. Also, the returned result, and actually
+/// even it's type (map from local to region), is nonsense.
 pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, facts::Region>> {
     trace!("[enter] load_variable_regions(path={:?})", path);
     let mut variable_regions = HashMap::new();
@@ -64,6 +66,12 @@ pub fn load_variable_regions(path: &Path) -> io::Result<HashMap<mir::Local, fact
     Ok(variable_regions)
 }
 
+/// function that reads informations about the mapping from regions to the locals that are involved
+/// in their introduction from a MIR dump (at the "renumber" pass.)
+/// The path to the dump is passed as argument, and the read mapping from regions to locals
+/// will be returned.
+/// Note that this method parses the MIR dump, and hence the result might depend on the syntax etc.
+/// of the dump, and hence it might change/break when switching to a different compiler version.
 pub fn load_region_to_local_map(path: &Path) -> io::Result<HashMap<facts::Region, mir::Local>> {
     let mut result: HashMap<facts::Region, mir::Local> = HashMap::new();
 
