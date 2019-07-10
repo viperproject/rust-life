@@ -508,19 +508,6 @@ impl <'epf> ErrorPathFinder<'epf> {
 
         assert!(self.error_fact.1.contains(&self.error_loan));
 
-//        let mut points_of_error_loan = self.points_of_loan(self.error_loan);
-//        points_of_error_loan.sort_unstable();
-//
-//        debug!("points_of_error_loan: {:?}", points_of_error_loan);
-
-//        let start_points_of_error_region = self.find_start_points(&points_of_error_region);
-//
-//        debug!("start_points_of_error_region: {:?}", start_points_of_error_region);
-
-//        self.start_points_of_error_loan = self.find_start_points(&points_of_error_loan);
-//
-//        debug!("start_points_of_error_loan: {:?}", self.start_points_of_error_loan);
-
         debug!("Start computing path to error:");
 
         let mut path_to_error: Vec<Region> = Vec::new();
@@ -643,23 +630,10 @@ impl <'epf> ErrorPathFinder<'epf> {
     /// e.g. for the sake of performance.)
     fn path_to_error_backwards(&self, start: Region, mut cur_path: &mut Vec<Region>)
                                -> bool {
-//        let points_of_cur_region: Vec<PointIndex> = self.points_of_region(start);
-//        let start_points_of_cur_region = self.find_start_points(&points_of_cur_region);
         debug!("cur_region (start): {:?}", start);
-//        debug!("points_of_cur_region: {:?}", points_of_cur_region);
-//        debug!("start_points_of_cur_region: {:?}", start_points_of_cur_region);
 
         // add start to the path, as it will now become part of it.
         cur_path.push(start);
-
-//        for sp in start_points_of_cur_region {
-//            if self.start_points_of_error_loan.contains(&sp) {
-//                // this region's start intersects with the start of the loan that causes the error,
-//                // therefore we consider here to be the end of the relevant path, and therefore stop
-//                // (end recursion) and return success (true)
-//                return true
-//            }
-//        }
 
         let input_loans_of_cur_region =  self.loan_of_reagion(start);
         debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
@@ -1075,18 +1049,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         writeln!(outlive_graph, "digraph G {{");
 
-//        let mut regions_done = Vec::new();
-//
-//        for ((region1, region2), points) in outlives_at.iter() {
-//            if regions_done.contains(&(((region2, region1), points), 0)) {
-//                regions_done.remove_item(&(((region2, region1), points), 0));
-//                regions_done.push((((region2, region1), points), 1))
-//            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
-//                regions_done.push((((region1, region2), points), 0));
-//            }
-//
-//        }
-
         let mut i = 0;
 
         for ((region1, region2), points) in graph_information.iter() {
@@ -1094,73 +1056,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             let mut local_name2 = String::default();
             let mut local_source1 = syntax_pos::DUMMY_SP;
             let mut local_source2 = syntax_pos::DUMMY_SP;
-//            let mut fm_ln1;
-//            let mut fm_ln2;
             let mut local_source1_snip = String::default();
             let mut local_source2_snip= String::default();
             let mut point_ln;
             let mut point_snip = String::default();
-            //let mut anonym1_snip;
-
-//            for (local_x, rv) in self.variable_regions.iter() {
-//                if *region1 == rv {
-//                    let local_decl = &self.mir.local_decls[*local_x];
-//                    if local_decl.name != None {
-//                        local_name1 = local_decl.name.unwrap().to_string();
-//                        local_source1 = local_decl.source_info.span;
-//                    } else {
-//                        local_name1 = ("anonymous Variable").to_string();
-//                        for block_data in self.mir.basic_blocks().iter(){
-//                            for stmt in block_data.statements.iter(){
-//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-//                                    match l.local() {
-//                                        Some(v) => if v==*local_x{
-//                                            local_source1 = stmt.source_info.span;
-//                                        }
-//
-//                                        _ => {}
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//
-//                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
-//                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
-//                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
-//                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
-//                }
-//                else if *region2 == rv {
-//                    let local_decl = &self.mir.local_decls[*local_x];
-//                    if local_decl.name != None {
-//                        local_name2 = local_decl.name.unwrap().to_string();
-//                        local_source2 = local_decl.source_info.span;
-//                    } else {
-//                        local_name2 = ("anonymous Variable").to_string();
-//                        for block_data in self.mir.basic_blocks().iter(){
-//                            for stmt in block_data.statements.iter(){
-//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-//                                    match l.local() {
-//                                        Some(v) => if v==*local_x{
-//                                            local_source2 = stmt.source_info.span;
-//                                        }
-//
-//                                        _ => {}
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-////                    } else {
-////                        local_name2 = ("anonymous Variable").to_string();
-////                    }
-////                    local_source2 = local_decl.source_info.span;
-//                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
-//                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
-//                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
-//                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
-//                }
-//            }
 
             if let Some(local_x1) = self.region_to_local_map.get(region1) {
                 // there is a local (x) for region one, get some details about it
