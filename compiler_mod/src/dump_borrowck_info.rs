@@ -26,6 +26,7 @@ use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
 use self::regex::Regex;
 use self::facts::{PointIndex, Loan, Region};
+use facts::Point;
 
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
@@ -1052,72 +1053,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let mut i = 0;
 
         for ((region1, region2), points) in graph_information.iter() {
-            let mut local_name1 = String::default();
-            let mut local_name2 = String::default();
-            let mut local_source1 = syntax_pos::DUMMY_SP;
-            let mut local_source2 = syntax_pos::DUMMY_SP;
-            let mut local_source1_snip = String::default();
-            let mut local_source2_snip= String::default();
             let mut point_ln;
             let mut point_snip = String::default();
 
-            if let Some(local_x1) = self.region_to_local_map.get(region1) {
-                // there is a local (x) for region one, get some details about it
-                // (code copied from the old version)
-                let local_decl = &self.mir.local_decls[*local_x1];
-                if local_decl.name != None {
-                    local_name1 = local_decl.name.unwrap().to_string();
-                    local_source1 = local_decl.source_info.span;
-                } else {
-                    local_name1 = ("anonymous Variable").to_string();
-                    for block_data in self.mir.basic_blocks().iter() {
-                        for stmt in block_data.statements.iter() {
-                            if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                match l.local() {
-                                    Some(v) => if v==*local_x1 {
-                                        local_source1 = stmt.source_info.span;
-                                    }
-
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                }
-                let fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
-                local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
-            } else {
-                debug!("No locale (and hence no extra details) found for region1={:?}", region1);
-            }
-
-            if let Some(local_x2) = self.region_to_local_map.get(region2) {
-                // there is a local (x) for region tow, get some details about it
-                // (code copied from the old version)
-                let local_decl = &self.mir.local_decls[*local_x2];
-                if local_decl.name != None {
-                    local_name2 = local_decl.name.unwrap().to_string();
-                    local_source2 = local_decl.source_info.span;
-                } else {
-                    local_name2 = ("anonymous Variable").to_string();
-                    for block_data in self.mir.basic_blocks().iter() {
-                        for stmt in block_data.statements.iter() {
-                            if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                match l.local() {
-                                    Some(v) => if v==*local_x2{
-                                        local_source2 = stmt.source_info.span;
-                                    }
-
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                }
-                let fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
-                local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
-            } else {
-                debug!("No locale (and hence no extra details) found for region2={:?}", region2);
-            }
+            let (local_name1, local_source1_snip) = self.find_local_for_region(region1);
+            let (local_name2, local_source2_snip) = self.find_local_for_region(region2);
 
             let mut points_sort = points.clone();
             //println!("points {:?}: {:?}", i, points_sort);
@@ -1213,16 +1153,96 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 //        result
 //    }
 
+    /// This method finds all lines (of source code) that are involved in a certain region.
+    /// For this, it will first look up all points that are affected by this region in the map
+    /// that must be passed. Thereby it is intended that the map is either the borrow_region or the
+    /// requires relation. (These are obtained from the Polonius input/output facts) The result
+    /// might differ depending on the used relation.
+    /// The resulting set of lines is returned as a vector filled with tupes. The first element is
+    /// the number of the line, as usize, and the second is the actual source code (text), as
+    /// String.
     fn get_lines_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
             -> Vec<(usize, String)>{
         let mut result: Vec<(usize, String)> = Vec::new();
-
+        for pt in self.get_points_for_region(reg, map) {
+            result.push(self.get_line_for_point(pt));
+        }
         result
     }
 
+    /// Helper method for get_lines_for_region(...), it optains all points that are associated with
+    /// a given region in the mpa and returns them as a vector.
     fn get_points_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
             -> Vec<PointIndex> {
         map.iter().filter(|&(r, _, _)| *r == reg).map(|(_, _, p)| *p).collect()
+    }
+
+    /// Method that maps from a point (given as argument) to a source line. The information about
+    /// the line is obtained from the interner, the mir and the TyCtx that are part of self.
+    /// The resulting line is returned as a tuple giving first the line number, as usize, and then
+    /// the actual source code (text), as String.
+    fn get_line_for_point(&self, pt: PointIndex) -> (usize, String) {
+        // code for the mapping copied from the (legacy) print_outlive_error_graph method,
+        // slightly adapted.
+        let point1 = self.interner.get_point(pt);
+        let point_location = point1.location;
+        let point_block = &self.mir[point_location.block];
+        let point_span;
+        if point_block.statements.len() == point_location.statement_index{
+            let terminator = point_block.terminator.as_ref().unwrap();
+            point_span = terminator.source_info.span;
+        }else {
+            let stmt_x = &point_block.statements[point_location.statement_index];
+            point_span = stmt_x.source_info.span;
+        }
+        let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
+        let point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
+        let point_snip = point_ln.sf.get_line(point_line-1).unwrap().to_string();
+        (point_line, point_snip)
+    }
+
+    /// This function takes a Region and (tries to) map it to a local that introduced this region,
+    /// using the region_to_local_map from self.
+    /// It will return the a tuple of Strings. The first is the name of the local, and the second
+    /// the source code (text) that introduced this local and hence it's connection to the region.
+    /// If the found local has no name, the text "anonymous variable" is returned instead.
+    /// If the mapping to a local fails, an empty string is returned as name and as source, and an
+    /// message informing about this is logged at debug level. In addition, in this case, or when
+    /// the mapping to a source code snipped fails, an empty string will be returned as well.
+    fn find_local_for_region(&self, reg: &Region) -> (String, String) {
+        let mut local_name = String::default();
+        let mut local_source = syntax_pos::DUMMY_SP;
+        let mut local_source_snip = String::default();
+
+        if let Some(local_x1) = self.region_to_local_map.get(reg) {
+            // there is a local (x) for reg, get some details about it
+            // (code copied from an old version)
+            let local_decl = &self.mir.local_decls[*local_x1];
+            if local_decl.name != None {
+                local_name = local_decl.name.unwrap().to_string();
+                local_source = local_decl.source_info.span;
+            } else {
+                local_name = ("anonymous Variable").to_string();
+                for block_data in self.mir.basic_blocks().iter() {
+                    for stmt in block_data.statements.iter() {
+                        if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                            match l.local() {
+                                Some(v) => if v==*local_x1 {
+                                    local_source = stmt.source_info.span;
+                                }
+
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            let fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source.lo()).unwrap();
+            local_source_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+        } else {
+            debug!("No locale (and hence no extra details) found for region={:?}", reg);
+        }
+        (local_name, local_source_snip)
     }
 }
 
