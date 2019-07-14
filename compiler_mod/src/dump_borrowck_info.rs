@@ -843,7 +843,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("error_graph.dot");
 
-            self.print_outlive_error_graph(&graph_to_explain_last_error, &error_graph_path);
+            let enriched_graph_to_explain_last_error = self.create_enriched_graph(&graph_to_explain_last_error);
+
+            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path);
         }
 
         let expl_graph_path = PathBuf::from("nll-facts")
@@ -1026,85 +1028,62 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
     /// intended to describe a lifetime error in a program or it is an outlives graph (of some
-    /// portion) of a Rust program. During the printing process, the graph is also enriched with
-    /// some information from the program (e.g. source lines) that shall help to understand it and
-    /// to associate it with the program it originates form.
-    /// The graph that shall be printed is given as an FxHashMap that maps from a tuple of regions
-    /// to a vector of points. Note that the actual graph is described by the tuples that are used
-    /// as keys. These tuples describe the edges of the graph. The points only provided additional
-    /// information about where (in the program) these edges arise.
+    /// portion) of a Rust program. In adition to the actual graph, also quite some enriching
+    /// information from the program (e.g. source lines) that shall help to understand it and
+    /// to associate it with the program it originates form is printed.
+    /// The graph that shall be printed is given as an EnrichedErrorGraph struct, that does not
+    /// only provide the information about the edges of the graph, but also all enriching
+    /// information that shall be printed.
     /// The path to which the graph that will be written is given by the PathBuf graph_out_path. It
     /// must give a complete path to a file, either relative to the working directory or as absolute
     /// path, and it must also contain the file name. Note that any file that already exists at this
     /// location will be overwritten.
-    /// NOTE: This is the new version that will use new ways to find the locals and source lines
-    /// that are relevant for regions and constraints. Also, it will no longer check if two regions
-    /// are "equal" (edge from both to each other) and hence no longer print reflexive edges in a
-    /// special way, since such edges do no longer exist in the error path graph. (As this graph
-    /// describes a single-direction path, that is part of the outlives relation graph.)
+    /// NOTE: This is the new version that will use enriching information that is given as argument.
+    /// The functionality to get this information (and even more) that was present in the legacy
+    /// version of this method is now provied by some new methods that can be used to fill the
+    /// EnrichedErrorGraph before passing it to this method.
+    /// Also, this method will no longer check if two regions are "equal" (edge from both to each
+    /// other) and hence no longer print reflexive edges in a special way, since such edges do no
+    /// longer exist in the error path graph. (As this graph describes a single-direction path, that
+    /// is part of the outlives relation graph.)
     fn print_outlive_error_graph(&self,
-                                graph_information: &FxHashMap<(Region, Region), Vec<PointIndex>>,
+                                error_graph: &EnrichedErrorGraph,
                                 graph_out_path: &PathBuf) {
 
-        let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
+        let mut graph_file = File::create(graph_out_path).expect("Unable to create file");
 
-        writeln!(outlive_graph, "digraph G {{");
+        writeln!(graph_file, "digraph G {{");
 
         let mut i = 0;
 
-        for ((region1, region2), points) in graph_information.iter() {
-            let mut point_ln;
+        for (region1, region2) in error_graph.edges.iter() {
             let mut point_snip = String::default();
 
-            let (local_name1, local_source1_snip) = self.find_local_for_region(region1);
-            let (local_name2, local_source2_snip) = self.find_local_for_region(region2);
+            let (local_name1, local_source1_snip) = &error_graph.locals_for_regions[region1];
+            let (local_name2, local_source2_snip) = &error_graph.locals_for_regions[region2];
 
-            let mut points_sort = points.clone();
-            //println!("points {:?}: {:?}", i, points_sort);
-            let mut ind = usize::max_value();
-            //let mut point_x = self.interner.get_point(points_sort[0]);
-            //println!("unsirted: {:?}",points_sort);
-            for point in points_sort.iter(){
-                let point1 = self.interner.get_point(*point);
-                let point_location = point1.location;
-                let point_block = &self.mir[point_location.block];
-                let point_span;
-                if point_block.statements.len() == point_location.statement_index{
-                    let terminator = point_block.terminator.as_ref().unwrap();
-                    point_span = terminator.source_info.span;
-                }else {
-                    let stmt_x = &point_block.statements[point_location.statement_index];
-                    point_span = stmt_x.source_info.span;
-                }
-                let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
-                if point_line < ind {
-                    ind = point_line;
-                    point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
-                    point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
-                }
+            let (ind, point_snip) = &error_graph.lines_for_edges[&(*region1, *region2)];
 
-            }
-
-            if local_source1_snip != String::default(){
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            if *local_source1_snip != String::default(){
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
             }else {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
             }
-            if local_source2_snip != String::default(){
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            if *local_source2_snip != String::default(){
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
             }else {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
             }
 
             // write the box (graph node)  with the constraint information, and the edges around it.
-            writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-            writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
+            writeln!(graph_file, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            writeln!(graph_file, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
 
             i += 1;
         }
 
 
-        writeln!(outlive_graph, "}}");
+        writeln!(graph_file, "}}");
     }
 
     /// Method that produces a mpp that links regions to the locals that introduces this region.
@@ -1153,6 +1132,42 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 //        result
 //    }
 
+    fn create_enriched_graph(&self, graph_information: &FxHashMap<(Region, Region), Vec<PointIndex>>)
+            -> EnrichedErrorGraph {
+        let mut edges: Vec<(Region, Region)> =  graph_information.keys().map(|&(r1, r2)| (r1, r2)).collect();
+        edges.dedup();
+        let mut locals_for_regions = FxHashMap::default();
+        let mut lines_for_edges = FxHashMap::default();
+        for ((r1, r2), pts) in graph_information.iter() {
+            if ! locals_for_regions.contains_key(r1) {
+                locals_for_regions.insert(*r1, self.find_local_for_region(r1));
+            }
+            if ! locals_for_regions.contains_key(r2) {
+                locals_for_regions.insert(*r2, self.find_local_for_region(r2));
+            }
+            lines_for_edges.insert((*r1, *r2), self.find_first_line_for_points(pts));
+        }
+
+        let mut lines_for_regions = FxHashMap::default();
+        for (r1, r2) in edges.iter() {
+            if ! lines_for_regions.contains_key(r1) {
+                lines_for_regions.insert(*r1, self.get_lines_for_region(*r1, &self.borrowck_in_facts.borrow_region));
+            }
+            if ! lines_for_regions.contains_key(r2) {
+                lines_for_regions.insert(*r2, self.get_lines_for_region(*r2, &self.borrowck_in_facts.borrow_region));
+            }
+        }
+
+        EnrichedErrorGraph{
+            edges,
+            locals_for_regions,
+            lines_for_regions,
+            lines_for_edges,
+
+        }
+
+    }
+
     /// This method finds all lines (of source code) that are involved in a certain region.
     /// For this, it will first look up all points that are affected by this region in the map
     /// that must be passed. Thereby it is intended that the map is either the borrow_region or the
@@ -1161,7 +1176,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// The resulting set of lines is returned as a vector filled with tupes. The first element is
     /// the number of the line, as usize, and the second is the actual source code (text), as
     /// String.
-    fn get_lines_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
+    fn get_lines_for_region(&self, reg: Region, map: &Vec<(Region, Loan, PointIndex)>)
             -> Vec<(usize, String)>{
         let mut result: Vec<(usize, String)> = Vec::new();
         for pt in self.get_points_for_region(reg, map) {
@@ -1172,7 +1187,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     /// Helper method for get_lines_for_region(...), it optains all points that are associated with
     /// a given region in the mpa and returns them as a vector.
-    fn get_points_for_region(&self, reg: Region, map: Vec<(Region, Loan, PointIndex)>)
+    fn get_points_for_region(&self, reg: Region, map: &Vec<(Region, Loan, PointIndex)>)
             -> Vec<PointIndex> {
         map.iter().filter(|&(r, _, _)| *r == reg).map(|(_, _, p)| *p).collect()
     }
@@ -1244,6 +1259,66 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         }
         (local_name, local_source_snip)
     }
+
+    /// This function takes a set of points, and returns the first line (line on the lowest line)
+    /// that is related to these points.
+    /// Such a set of points can e.g. be obtained as extra information to an edged in the outlives
+    /// graph.
+    /// The result consists of a tuple that contains a line number, as usize, and the source code
+    /// (text) of the line, as String.
+    fn find_first_line_for_points(&self, pts: &Vec<PointIndex>) -> (usize, String) {
+        // most of the was copied from the (legacy) print_outlive_error_graph method
+        let mut point_snip = String::default();
+        let mut ind = usize::max_value();
+        for point in pts.iter(){
+            let point1 = self.interner.get_point(*point);
+            let point_location = point1.location;
+            let point_block = &self.mir[point_location.block];
+            let point_span;
+            if point_block.statements.len() == point_location.statement_index{
+                let terminator = point_block.terminator.as_ref().unwrap();
+                point_span = terminator.source_info.span;
+            }else {
+                let stmt_x = &point_block.statements[point_location.statement_index];
+                point_span = stmt_x.source_info.span;
+            }
+            let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
+            if point_line < ind {
+                ind = point_line;
+                let point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
+                point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
+            }
+        }
+        (ind, point_snip)
+    }
 }
 
+/// This struct describes a graph that explains a lifetime error in a method of a Rust program.
+/// The graph is connecting all regions/lifetimes that are relevant for this error by edges.
+/// In addition, this struct does also store quite soem extra information about this graph and
+/// the regions it touches that can be used to print the graph with a lot of explanatory information
+/// that shall be helpful for the programmers.
+/// This struct does not provided most methods that are needed for creating this graph and the extra
+/// information. Instead, these are provided by the MirInfoPrinter, since it contains a lot of
+/// information that is needed to create the enriched graph. This struct is primarily intended to
+/// store the information.
+struct EnrichedErrorGraph {
+    /// This is the core of the graph, the edges that define it
+    edges: Vec<(Region, Region)>,
+    /// This maps shall contain an entry for all regions that are part of the graph, and give the
+    /// local that introduces this region, plus the source code of the corresponding line.
+    /// The String shall empty if the information was not found for an edge.
+    locals_for_regions: FxHashMap<Region, (String, String)>,
+    /// This maps from regions to a list of lines that are considered to be relevant for this region
+    /// The information could have been obtained by using the method
+    /// MirInfoPrinter::get_lines_for_region(...) with an appropriate map.
+    /// The lines is always given as it's number (usize) and it's source code (text, String)
+    lines_for_regions: FxHashMap<Region, Vec<(usize, String)>>,
+    /// This maps from edges (given as tow regions) to a line that is considered to be have created
+    /// this edged/constraint.
+    /// The information could have been obtained from the points that are associated with this edge
+    /// in the outlives relation.
+    /// The lines is always given as it's number (usize) and it's source code (text, String)
+    lines_for_edges: FxHashMap<(Region, Region), (usize, String)>
+}
 
