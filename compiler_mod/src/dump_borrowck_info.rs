@@ -843,9 +843,34 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             .join(self.def_path.to_filename_friendly_no_crate())
             .join("error_graph.dot");
 
-            let enriched_graph_to_explain_last_error = self.create_enriched_graph(&graph_to_explain_last_error);
+            let enriched_graph_to_explain_last_error =
+                self.create_enriched_graph(&graph_to_explain_last_error, &self.borrowck_in_facts.borrow_region);
 
             self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path);
+
+            let error_graph_path_with_requires = PathBuf::from("nll-facts")
+                .join(self.def_path.to_filename_friendly_no_crate())
+                .join("error_graph_with_requires.dot");
+
+            // TODO if we want to keep using "requires" here, e.g. for enriching and printing the
+            // TODO graph, then we should probably compute and store it before calling compute_error_path(...),
+            // TODO and not compute it again here, and hence computing it twice.
+            let mut requires = self.borrowck_in_facts.borrow_region.clone();
+            requires.extend(
+                self.borrowck_out_facts.restricts.iter().flat_map(
+                    |(&point, region_map)|
+                        region_map.iter().flat_map(
+                            move |(&region, loans)|
+                                loans.iter().map(move |&loan| (region, loan, point))
+                        )
+                )
+            );
+
+            let enriched_graph_to_explain_last_error_requires =
+                self.create_enriched_graph(&graph_to_explain_last_error, &requires);
+
+            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error_requires, &error_graph_path_with_requires);
+
         }
 
         let expl_graph_path = PathBuf::from("nll-facts")
@@ -1064,19 +1089,29 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             let (ind, point_snip) = &error_graph.lines_for_edges[&(*region1, *region2)];
 
+            let mut region1_lines_str = String::default();
+            let mut region2_lines_str = String::default();
+            for (line_nr, line_str) in error_graph.lines_for_regions[region1].iter() {
+                region1_lines_str.push_str(&format!("<tr><td>{}: {}</td></tr>", line_nr, line_str.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;")));
+            }
+            for (line_nr, line_str) in error_graph.lines_for_regions[region2].iter() {
+                region2_lines_str.push_str(&format!("<tr><td>{}: {}</td></tr>", line_nr, line_str.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;")));
+            }
+
             if *local_source1_snip != String::default(){
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr>{}</table>> ]", region1, region1, local_name1, region1, local_source1_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region1_lines_str);
             }else {
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr>{}</table>> ]", region1, region1, local_name1, region1, region1_lines_str
+                );
             }
             if *local_source2_snip != String::default(){
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr>{}</table>> ]", region2, region2, local_name2, region2, local_source2_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region2_lines_str);
             }else {
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr>{}</table>> ]", region2, region2, local_name2, region2, region2_lines_str);
             }
 
             // write the box (graph node)  with the constraint information, and the edges around it.
-            writeln!(graph_file, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+            writeln!(graph_file, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
             writeln!(graph_file, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
 
             i += 1;
@@ -1132,12 +1167,28 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 //        result
 //    }
 
-    fn create_enriched_graph(&self, graph_information: &FxHashMap<(Region, Region), Vec<PointIndex>>)
+    /// Function that creates the enriched error graph for the passed graph information.
+    /// This will take a graph as FxJaschMap from pairs of regions (these represent the edges)
+    /// to points. (these are some extra information about the edges that can be obtained from the
+    /// outlives relation)
+    /// The graph is then returned as an EnrichedErrorGraph that contains quite some extra
+    /// information about the graph, and especially about it's relation to the source code (i.e.
+    /// the program) it originates from. This extra information is extracted from information
+    /// that is available as part of self (e.g. a TyCtx or a parsed MIR dump or the input/output
+    /// facts of Polonius), by using some methos that are also available in the MirInofPrint (i.e
+    /// self)
+    /// In addition, this method needs a "map" from points to loans and regions. This is the map
+    /// that will be passed to get_lines_for_region(...) for the mapping, so see this method's
+    /// documentation for more details.
+    fn create_enriched_graph(&self, graph_information: &FxHashMap<(Region, Region), Vec<PointIndex>>,
+                             region_loan_point_map: &Vec<(Region, Loan, PointIndex)>)
             -> EnrichedErrorGraph {
         let mut edges: Vec<(Region, Region)> =  graph_information.keys().map(|&(r1, r2)| (r1, r2)).collect();
         edges.dedup();
         let mut locals_for_regions = FxHashMap::default();
         let mut lines_for_edges = FxHashMap::default();
+        let mut lines_for_regions = FxHashMap::default();
+
         for ((r1, r2), pts) in graph_information.iter() {
             if ! locals_for_regions.contains_key(r1) {
                 locals_for_regions.insert(*r1, self.find_local_for_region(r1));
@@ -1146,15 +1197,12 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 locals_for_regions.insert(*r2, self.find_local_for_region(r2));
             }
             lines_for_edges.insert((*r1, *r2), self.find_first_line_for_points(pts));
-        }
 
-        let mut lines_for_regions = FxHashMap::default();
-        for (r1, r2) in edges.iter() {
             if ! lines_for_regions.contains_key(r1) {
-                lines_for_regions.insert(*r1, self.get_lines_for_region(*r1, &self.borrowck_in_facts.borrow_region));
+                lines_for_regions.insert(*r1, self.get_lines_for_region(*r1, region_loan_point_map));
             }
             if ! lines_for_regions.contains_key(r2) {
-                lines_for_regions.insert(*r2, self.get_lines_for_region(*r2, &self.borrowck_in_facts.borrow_region));
+                lines_for_regions.insert(*r2, self.get_lines_for_region(*r2, region_loan_point_map));
             }
         }
 
@@ -1173,6 +1221,9 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// that must be passed. Thereby it is intended that the map is either the borrow_region or the
     /// requires relation. (These are obtained from the Polonius input/output facts) The result
     /// might differ depending on the used relation.
+    /// Duplicate lines, i.e. lines that have the same line number are ignored, i.e. each line is
+    /// present at most once in the result. In adition, the lines will be sorted by ascending line
+    /// number in the result.
     /// The resulting set of lines is returned as a vector filled with tupes. The first element is
     /// the number of the line, as usize, and the second is the actual source code (text), as
     /// String.
@@ -1180,13 +1231,19 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             -> Vec<(usize, String)>{
         let mut result: Vec<(usize, String)> = Vec::new();
         for pt in self.get_points_for_region(reg, map) {
-            result.push(self.get_line_for_point(pt));
+            let (line_nr, line_str) = self.get_line_for_point(pt);
+            if result.iter().find(|(n, _)| *n == line_nr).is_none() {
+                result.push((line_nr, line_str));
+            }
         }
+        // This will sort the vector by line numbers. (First element of the tuples in the vector,
+        // and there are no duplicates. Therefore, we can also use the faster unstable sort.)
+        result.sort_unstable();
         result
     }
 
-    /// Helper method for get_lines_for_region(...), it optains all points that are associated with
-    /// a given region in the mpa and returns them as a vector.
+    /// Helper method for get_lines_for_region(...), it obtains all points that are associated with
+    /// a given region in the map and returns them as a vector.
     fn get_points_for_region(&self, reg: Region, map: &Vec<(Region, Loan, PointIndex)>)
             -> Vec<PointIndex> {
         map.iter().filter(|&(r, _, _)| *r == reg).map(|(_, _, p)| *p).collect()
