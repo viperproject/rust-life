@@ -14,7 +14,7 @@ use super::regions;
 use std::{cell};
 use std::env;
 use std::collections::{HashMap,BTreeMap, BTreeSet};
-use std::fs::File;
+use std::fs::{File, remove_dir};
 use std::io::{self, Write, BufWriter};
 use std::path::PathBuf;
 use self::polonius_engine::{Algorithm, Output};
@@ -840,13 +840,21 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             self.print_outlive_error_graph_legacy(&graph_to_explain_last_error, &old_error_graph_path);
 
             let error_graph_path = PathBuf::from("nll-facts")
-            .join(self.def_path.to_filename_friendly_no_crate())
-            .join("error_graph.dot");
+                .join(self.def_path.to_filename_friendly_no_crate())
+                .join("error_graph.dot");
 
-            let enriched_graph_to_explain_last_error =
+            let mut enriched_graph_to_explain_last_error =
                 self.create_enriched_graph(&graph_to_explain_last_error, &self.borrowck_in_facts.borrow_region);
 
             self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path);
+
+            let error_graph_path_improved = PathBuf::from("nll-facts")
+                .join(self.def_path.to_filename_friendly_no_crate())
+                .join("error_graph_improved.dot");
+
+            enriched_graph_to_explain_last_error.improve_graph();
+
+            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path_improved);
 
             let error_graph_path_with_requires = PathBuf::from("nll-facts")
                 .join(self.def_path.to_filename_friendly_no_crate())
@@ -1084,8 +1092,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         for (region1, region2) in error_graph.edges.iter() {
             let mut point_snip = String::default();
 
-            let (local_name1, local_source1_snip) = &error_graph.locals_for_regions[region1];
-            let (local_name2, local_source2_snip) = &error_graph.locals_for_regions[region2];
+            let (_, local_name1, local_source1_snip) = &error_graph.locals_for_regions[region1];
+            let (_, local_name2, local_source2_snip) = &error_graph.locals_for_regions[region2];
 
             let (ind, point_snip) = &error_graph.lines_for_edges[&(*region1, *region2)];
 
@@ -1281,10 +1289,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// If the mapping to a local fails, an empty string is returned as name and as source, and an
     /// message informing about this is logged at debug level. In addition, in this case, or when
     /// the mapping to a source code snipped fails, an empty string will be returned as well.
-    fn find_local_for_region(&self, reg: &Region) -> (String, String) {
+    fn find_local_for_region(&self, reg: &Region) -> (Option<mir::LocalDecl>, String, String) {
         let mut local_name = String::default();
         let mut local_source = syntax_pos::DUMMY_SP;
         let mut local_source_snip = String::default();
+        let mut local_decl_option = None;
 
         if let Some(local_x1) = self.region_to_local_map.get(reg) {
             // there is a local (x) for reg, get some details about it
@@ -1311,10 +1320,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
             let fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source.lo()).unwrap();
             local_source_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+            local_decl_option = Some(local_decl.clone());
         } else {
             debug!("No locale (and hence no extra details) found for region={:?}", reg);
         }
-        (local_name, local_source_snip)
+        (local_decl_option, local_name, local_source_snip)
     }
 
     /// This function takes a set of points, and returns the first line (line on the lowest line)
@@ -1359,13 +1369,19 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 /// information. Instead, these are provided by the MirInfoPrinter, since it contains a lot of
 /// information that is needed to create the enriched graph. This struct is primarily intended to
 /// store the information.
-struct EnrichedErrorGraph {
+struct EnrichedErrorGraph<'tcx> {
     /// This is the core of the graph, the edges that define it
     edges: Vec<(Region, Region)>,
     /// This maps shall contain an entry for all regions that are part of the graph, and give the
     /// local that introduces this region, plus the source code of the corresponding line.
-    /// The String shall empty if the information was not found for an edge.
-    locals_for_regions: FxHashMap<Region, (String, String)>,
+    /// If the local is found, the first element shall be Some(the MIR of the local declaration),
+    /// otherwise it shall be None. If the local was found, the second element is the name of the
+    /// local (or something like "anonymous variable" if it has no name), and the last element is
+    /// intended to be the source line that introduced this local and hence the region. (both as
+    /// text/String)
+    /// The Strings shall be empty if the information was not found for an edge. (This is certainly
+    /// the case if the first element is None)
+    locals_for_regions: FxHashMap<Region, (Option<mir::LocalDecl<'tcx>>, String, String)>,
     /// This maps from regions to a list of lines that are considered to be relevant for this region
     /// The information could have been obtained by using the method
     /// MirInfoPrinter::get_lines_for_region(...) with an appropriate map.
@@ -1379,3 +1395,118 @@ struct EnrichedErrorGraph {
     lines_for_edges: FxHashMap<(Region, Region), (usize, String)>
 }
 
+impl<'tcx> EnrichedErrorGraph<'tcx> {
+    /// This method operates (only) on the edges of the graph and finds one region that is an entry
+    /// region, i.e. a region that is a graph node with no ingoing edges. It will simply return the
+    /// first region that fulfils this criterion that is encountered. This is fine, as the error
+    /// graphs actually describe a path, and hence they should have only one entry node/region.
+    /// If no such region is found (this is not expected for current error paths, but might happen
+    /// if the graph would be cyclic), then Region(usize::max_value()) is returned.
+    fn find_entry_region (&self) -> Region {
+        let mut result= Region::from(usize::max_value());
+        for (r1_candidate, _) in self.edges.iter() {
+            // we only care about the first node of an edge, since only these can be entry nodes
+            // so we check if this region has no predecessors
+            if self.edges.iter().find(|(_, r2)| r1_candidate == r2).is_none() {
+                result = *r1_candidate;
+                break;
+            }
+        }
+        result
+    }
+
+    /// This method operates (only) on the edges of the graph and finds one region that is an exit
+    /// region, i.e. a region that is a graph node with no outgoing edges. It will simply return the
+    /// first region that fulfils this criterion that is encountered. This is fine, as the error
+    /// graphs actually describe a path, and hence they should have only one entry node/region.
+    /// If no such region is found (this is not expected for current error paths, but might happen
+    /// if the graph would be cyclic), then Region(usize::max_value()) is returned.
+    fn find_exit_region (&self) -> Region {
+        let mut result= Region::from(usize::max_value());
+        for (_, r2_candidate) in self.edges.iter() {
+            // we only care about the second node of an edge, since only these can be exit nodes
+            // so we check if this region has no outgoing edges
+            if self.edges.iter().find(|(r1, _)| r2_candidate == r1).is_none() {
+                result = *r2_candidate;
+                break;
+            }
+        }
+        result
+    }
+
+    /// This method will improve the graph that it is called on to make it more readable and
+    /// understandable. However, "improving" is somewhat subtle and subjective.
+    /// What this method does is removing nodes, and hence regions.
+    /// More exactly, it will remove all regions that either are not associated with a local
+    /// or that are associated with a local that has no name, hence that is an anonymous variable.
+    /// However, the first and the last node in the graph (that actually is a path) will never be
+    /// removed. (These regions are found by using the find_entry_region and find_exit_region
+    /// methods) The mapping to locals is taken from the locals_for_regions field of self, so it
+    /// must be set appropriately before calling this method, otherwise it will not work.
+    /// Please note that this method takes a mutable reference to self, and it will indeed mutate
+    /// the graph. This is how it will return it's actual results. More exactly, it will change
+    /// the set of edges, i.e. it will remove the edges that contain unneeded regions and replace
+    /// them with direct edges that connect all previous and posteriors nodes of the removed
+    /// node without going over the removed node anymore.
+    /// In addition, this method will add an entry to lines_for_edges for all newly created edges.
+    /// If two edges are merged (as described before), the information form the first of these tow
+    /// edges is inserted as information for the newly created edge. If this information is not
+    /// equal to the one of the second edged (based on the line number), a debug message will be
+    /// printed to the log in an appropriate log level is set.
+    /// All other fields of the EnrichedErrorGraph are not modified, so all information that was
+    /// acquired before about the unneeded regions is kept.
+    fn improve_graph(&mut self) {
+        let first_region = self.find_entry_region();
+        let last_region = self.find_exit_region();
+
+        /// internal helper closure that does check if a region si either the first or the last
+        /// region in the input path
+        let is_not_first_or_last_region = |reg: &Region| {
+            *reg != first_region && *reg != last_region
+        };
+
+        let mut new_edges = self.edges.clone();
+        let mut new_lines_for_edges = self.lines_for_edges.clone();
+
+        /// helper closure that removes regions from the graph by manipulating new_edges.
+        /// will never remove entry or exit nodes/regions of a graph, these are ignored.
+        /// will also update self.lines_for_edges with info about any newly created edges.
+        /// TODO Maybe this could be implemented slightly more efficiently, esp. if using drain_filer on edges. And it might be worth doing so, since it can be used often.
+        let mut remove_region_from_edges = |reg: &Region| {
+            if is_not_first_or_last_region(reg) {
+                let in_edges_start: Vec<(_)> = new_edges.iter().filter(|(_, r2)| reg == r2).map(|&(r1, _)| r1).collect();
+                let out_edges_end: Vec<(_)> = new_edges.iter().filter(|(r1, _)| reg == r1).map(|&(_, r2)| r2).collect();
+
+                new_edges = new_edges.iter().filter(|(r1, r2)|
+                    r1 != reg && r2 != reg
+                ).map(|&edge| edge).collect();
+
+                for r1 in in_edges_start.iter() {
+                    for r2 in out_edges_end.iter() {
+                        new_edges.push((*r1, *r2));
+                        let (in_line_info_nr, in_line_info_src) = &new_lines_for_edges[&(*r1, *reg)];
+                        let (out_line_info_nr, _) = &new_lines_for_edges[&(*reg, *r2)];
+                        if in_line_info_nr != out_line_info_nr {
+                            debug!("graph edges that were merged while improving the graph did not \
+                            have the same origin information (line number), for merging edges \
+                            ({:?}, {:?}) and ({:?}, {:?}). Will only preserve information for the \
+                            first edge.", r1, reg, reg, r2);
+                        }
+                        new_lines_for_edges.insert((*r1, *r2), (*in_line_info_nr, in_line_info_src.clone()));
+                    }
+                }
+            }
+            // else: do nothing, since this is an entry or exit node/region
+        };
+
+        for (reg, (local_decl_opt, _, _)) in self.locals_for_regions.iter() {
+            match local_decl_opt {
+                None => remove_region_from_edges(reg),
+                Some(local_decl) => if local_decl.name.is_none() { remove_region_from_edges(reg) }
+                                 // else: keep this region
+            }
+        }
+        self.edges = new_edges;
+        self.lines_for_edges = new_lines_for_edges;
+    }
+}
