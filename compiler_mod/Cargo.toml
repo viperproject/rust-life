@@ -1,11 +1,9 @@
 [package]
 name = "extract-error"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Dominik Dietler <ddietler@student.ethz.ch>"]
 
 [dependencies]
-#Old versions, pinned only for old compiler TODO: remove after compiler update!
-#proc-macro2 = "= 0.4.19"
 log = "0.4" # did change "automatically" anyway, should we change it here?
 lazy_static = "1.0"
 #polonius-engine = { git = "https://github.com/shadow5tepper/polonius"}
