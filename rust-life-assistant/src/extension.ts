@@ -11,6 +11,8 @@ import * as config from './config';
 export function activate(context: vscode.ExtensionContext) {
 
 	// Function that runs the rust-life tool on a given argument
+	// Once the tool terminated, the output of it (JSON) will be opened from the file and returned for further usage,
+	// after being parsed to a object.
 	async function runRustLife(document: vscode.TextDocument) {
 		if (document.languageId === "rust") {
 			vscode.window.setStatusBarMessage("Running rust-life (compiler mod)...");
@@ -23,7 +25,7 @@ export function activate(context: vscode.ExtensionContext) {
 				config.rustLifeExe(context),
 				["--sysroot", config.rustCompilerPath(), programPath],
 				{
-					cwd: path.dirname(programPath), // TODO maybe move to a different/better location to get the rust-life output there.
+					cwd: config.rustLifeHome(context),
 					env: {
 						RUST_BACKTRACE: "1",
 						PATH: process.env.PATH,  // Needed e.g. to run Rustup (probably not really needed right now, but does not harm.)
@@ -34,6 +36,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const duration = Math.round((performance.now() - start) / 100) / 10;
 			vscode.window.setStatusBarMessage(`rust-life (compiler mod) terminated (${duration} s)`);
+
+			let result = require(path.join(config.rustLifeHome(context), "nll-facts", "error_graph.json"));
+			return result;
 		} else {
 			util.log(
 				"The document is not a Rust program, thus rust-life (compiler mod) will not run on it."
@@ -48,16 +53,25 @@ export function activate(context: vscode.ExtensionContext) {
 		// The code you place here will be executed every time your command is executed
 
 		// Display a message box to the user
-		vscode.window.showInformationMessage('Rust Life visualization started.');
+		// vscode.window.showInformationMessage('Rust Life visualization started.');
 
-		// get the name of the currently opened file and run rust life on it:
+		// get the name of the currently opened file and run rust life on it, getting back the error path (graph):
+		let errorPath;
 		if (vscode.window.activeTextEditor) {
-			await runRustLife(
+			errorPath = await runRustLife(
 				vscode.window.activeTextEditor.document
 			);
 		} else {
 			util.log("vscode.window.activeTextEditor is not ready yet.");
 		}
+		if (errorPath == null) {
+			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.');
+			// give up, return from the command callback:
+			return;
+		}
+		util.log(errorPath);
+
+		vscode.window.showInformationMessage(`Currently handled function: ${errorPath.function_name}`);
 	});
 
 	context.subscriptions.push(disposable);

@@ -858,8 +858,14 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path_improved);
 
+            // Write the JSON dump to a directory that does not depend on the method name. Note that
+            // this will not work well with multiple errors (in different methods), since the file
+            // would be overwriten for each error. However, for now we limit the tools scope to
+            // only deal with files with a single error for simplicity. This could be changed in the
+            // future, e.g. by allowing control to the user regarding the method that shall be
+            // handled.
             let error_graph_path_json = PathBuf::from("nll-facts")
-                .join(self.def_path.to_filename_friendly_no_crate())
+//                .join(self.def_path.to_filename_friendly_no_crate())
                 .join("error_graph.json");
 
             self.dump_outlive_error_graph_as_json(&enriched_graph_to_explain_last_error, &error_graph_path_json);
@@ -1252,6 +1258,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         }
 
         EnrichedErrorGraph{
+            function_name: self.def_path.to_filename_friendly_no_crate(),
             edges,
             locals_mir_for_regions,
             locals_info_for_regions,
@@ -1409,6 +1416,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 /// store the information.
 #[derive(serde_derive::Serialize)]
 struct EnrichedErrorGraph<'tcx> {
+    /// This shall give the name of the method/function that this error was found in, and hence the
+    /// function/method from whom information is depicted by this graph.
+    /// NOTE: For now, no fixed decisions regarding the format of the name were taken.
+    function_name: String,
     /// This is the core of the graph, the edges that define it
     edges: Vec<(Region, Region)>,
     /// This map shall contain an entry for all regions that are part of the graph, and give the
