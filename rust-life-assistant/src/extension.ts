@@ -21,12 +21,12 @@ export function activate(context: vscode.ExtensionContext) {
 			const output = await util.spawn(
 				//"LD_LIBRARY_PATH=" + config.rustLibPath() + " " + config.rustLifeExe(context),
 				config.rustLifeExe(context),
-				["--sysroot " + config.rustCompilerPath(), programPath],
+				["--sysroot", config.rustCompilerPath(), programPath],
 				{
-					cwd: path.dirname(programPath),
+					cwd: path.dirname(programPath), // TODO maybe move to a different/better location to get the rust-life output there.
 					env: {
 						RUST_BACKTRACE: "1",
-						PATH: process.env.PATH,  // Needed e.g. to run Rustup
+						PATH: process.env.PATH,  // Needed e.g. to run Rustup (probably not really needed right now, but does not harm.)
 						LD_LIBRARY_PATH: config.rustLibPath()
 					}
 				}
