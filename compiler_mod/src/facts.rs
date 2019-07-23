@@ -13,6 +13,7 @@ use dump_borrowck_info::regex::Regex;
 use rustc::mir;
 use dump_borrowck_info::rustc_data_structures::indexed_vec::Idx;
 use dump_borrowck_info::serde::de::DeserializeOwned;
+use dump_borrowck_info::serde_derive;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::Path;
@@ -25,7 +26,7 @@ use dump_borrowck_info::polonius_engine;
 /// Macro for declaring index types for referencing interned facts.
 macro_rules! index_type {
     ($typ:ident, $debug_str:ident) => {
-        #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy, Hash)]
+        #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy, Hash, serde_derive::Serialize)]
         pub struct $typ(usize);
 
         impl From<usize> for $typ {

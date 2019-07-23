@@ -6,6 +6,8 @@ pub extern crate regex;
 pub extern crate rustc;
 pub extern crate rustc_data_structures;
 pub extern crate serde;
+pub extern crate serde_json;
+pub extern crate serde_derive;
 pub extern crate syntax_pos;
 
 use super::facts;
@@ -856,28 +858,34 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path_improved);
 
-            let error_graph_path_with_requires = PathBuf::from("nll-facts")
+            let error_graph_path_json = PathBuf::from("nll-facts")
                 .join(self.def_path.to_filename_friendly_no_crate())
-                .join("error_graph_with_requires.dot");
+                .join("error_graph.json");
 
-            // TODO if we want to keep using "requires" here, e.g. for enriching and printing the
-            // TODO graph, then we should probably compute and store it before calling compute_error_path(...),
-            // TODO and not compute it again here, and hence computing it twice.
-            let mut requires = self.borrowck_in_facts.borrow_region.clone();
-            requires.extend(
-                self.borrowck_out_facts.restricts.iter().flat_map(
-                    |(&point, region_map)|
-                        region_map.iter().flat_map(
-                            move |(&region, loans)|
-                                loans.iter().map(move |&loan| (region, loan, point))
-                        )
-                )
-            );
+            self.dump_outlive_error_graph_as_json(&enriched_graph_to_explain_last_error, &error_graph_path_json);
 
-            let enriched_graph_to_explain_last_error_requires =
-                self.create_enriched_graph(&graph_to_explain_last_error, &requires);
-
-            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error_requires, &error_graph_path_with_requires);
+//            let error_graph_path_with_requires = PathBuf::from("nll-facts")
+//                .join(self.def_path.to_filename_friendly_no_crate())
+//                .join("error_graph_with_requires.dot");
+//
+//            // TODO if we want to keep using "requires" here, e.g. for enriching and printing the
+//            // TODO graph, then we should probably compute and store it before calling compute_error_path(...),
+//            // TODO and do not compute it again here, and hence computing it twice.
+//            let mut requires = self.borrowck_in_facts.borrow_region.clone();
+//            requires.extend(
+//                self.borrowck_out_facts.restricts.iter().flat_map(
+//                    |(&point, region_map)|
+//                        region_map.iter().flat_map(
+//                            move |(&region, loans)|
+//                                loans.iter().map(move |&loan| (region, loan, point))
+//                        )
+//                )
+//            );
+//
+//            let enriched_graph_to_explain_last_error_requires =
+//                self.create_enriched_graph(&graph_to_explain_last_error, &requires);
+//
+//            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error_requires, &error_graph_path_with_requires);
 
         }
 
@@ -1061,7 +1069,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
     /// intended to describe a lifetime error in a program or it is an outlives graph (of some
-    /// portion) of a Rust program. In adition to the actual graph, also quite some enriching
+    /// portion) of a Rust program. In addition to the actual graph, also quite some enriching
     /// information from the program (e.g. source lines) that shall help to understand it and
     /// to associate it with the program it originates form is printed.
     /// The graph that shall be printed is given as an EnrichedErrorGraph struct, that does not
@@ -1073,7 +1081,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// location will be overwritten.
     /// NOTE: This is the new version that will use enriching information that is given as argument.
     /// The functionality to get this information (and even more) that was present in the legacy
-    /// version of this method is now provied by some new methods that can be used to fill the
+    /// version of this method is now provided by some new methods that can be used to fill the
     /// EnrichedErrorGraph before passing it to this method.
     /// Also, this method will no longer check if two regions are "equal" (edge from both to each
     /// other) and hence no longer print reflexive edges in a special way, since such edges do no
@@ -1092,8 +1100,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         for (region1, region2) in error_graph.edges.iter() {
             let mut point_snip = String::default();
 
-            let (_, local_name1, local_source1_snip) = &error_graph.locals_for_regions[region1];
-            let (_, local_name2, local_source2_snip) = &error_graph.locals_for_regions[region2];
+            let (local_name1, local_source1_snip) = &error_graph.locals_info_for_regions[region1];
+            let (local_name2, local_source2_snip) = &error_graph.locals_info_for_regions[region2];
 
             let (ind, point_snip) = &error_graph.lines_for_edges[&(*region1, *region2)];
 
@@ -1127,6 +1135,27 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
 
         writeln!(graph_file, "}}");
+    }
+
+    /// This function will serialize a graph to JSON and write it to a file. This graph either is
+    /// intended to describe a lifetime error in a program or it is an outlives graph (of some
+    /// portion) of a Rust program. In addition to the actual graph, also quite some enriching
+    /// information from the program (e.g. source lines) that shall help to understand it and
+    /// to associate it with the program it originates form is included.
+    /// The graph that shall be dumped is given as an EnrichedErrorGraph struct, that does not
+    /// only provide the information about the edges of the graph, but also all enriching
+    /// information that shall be included.
+    /// The path to which the file that will be written is given by the PathBuf graph_out_path. It
+    /// must give a complete path to a file, either relative to the working directory or as absolute
+    /// path, and it must also contain the file name. Note that any file that already exists at this
+    /// location will be overwritten.
+    fn dump_outlive_error_graph_as_json(&self,
+                                        error_graph: &EnrichedErrorGraph,
+                                        graph_out_path: &PathBuf) {
+        let mut out_file = File::create(graph_out_path).expect("Unable to create file");
+        let res = serde_json::to_writer_pretty(out_file, error_graph);
+        // TODO ev. remove pretty when done with debugging!
+        debug!("Result from dumping: {:?}", res);
     }
 
     /// Method that produces a mpp that links regions to the locals that introduces this region.
@@ -1193,18 +1222,26 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             -> EnrichedErrorGraph {
         let mut edges: Vec<(Region, Region)> =  graph_information.keys().map(|&(r1, r2)| (r1, r2)).collect();
         edges.dedup();
-        let mut locals_for_regions = FxHashMap::default();
+        let mut locals_mir_for_regions = FxHashMap::default();
+        let mut locals_info_for_regions = FxHashMap::default();
         let mut lines_for_edges = FxHashMap::default();
+        let mut lines_for_edges_start = FxHashMap::default();
         let mut lines_for_regions = FxHashMap::default();
 
         for ((r1, r2), pts) in graph_information.iter() {
-            if ! locals_for_regions.contains_key(r1) {
-                locals_for_regions.insert(*r1, self.find_local_for_region(r1));
+            if ! locals_info_for_regions.contains_key(r1) {
+                let (local_decl, local_name, local_src) = self.find_local_for_region(r1);
+                locals_mir_for_regions.insert(*r1, local_decl);
+                locals_info_for_regions.insert(*r1, (local_name, local_src));
             }
-            if ! locals_for_regions.contains_key(r2) {
-                locals_for_regions.insert(*r2, self.find_local_for_region(r2));
+            if ! locals_info_for_regions.contains_key(r2) {
+                let (local_decl, local_name, local_src) = self.find_local_for_region(r2);
+                locals_mir_for_regions.insert(*r2, local_decl);
+                locals_info_for_regions.insert(*r2, (local_name, local_src));
             }
-            lines_for_edges.insert((*r1, *r2), self.find_first_line_for_points(pts));
+            let line_for_egge_points = self.find_first_line_for_points(pts);
+            lines_for_edges.insert((*r1, *r2), line_for_egge_points.clone());
+            lines_for_edges_start.insert(*r1, line_for_egge_points);
 
             if ! lines_for_regions.contains_key(r1) {
                 lines_for_regions.insert(*r1, self.get_lines_for_region(*r1, region_loan_point_map));
@@ -1216,10 +1253,11 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         EnrichedErrorGraph{
             edges,
-            locals_for_regions,
+            locals_mir_for_regions,
+            locals_info_for_regions,
             lines_for_regions,
             lines_for_edges,
-
+            lines_for_edges_start,
         }
 
     }
@@ -1369,19 +1407,28 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 /// information. Instead, these are provided by the MirInfoPrinter, since it contains a lot of
 /// information that is needed to create the enriched graph. This struct is primarily intended to
 /// store the information.
+#[derive(serde_derive::Serialize)]
 struct EnrichedErrorGraph<'tcx> {
     /// This is the core of the graph, the edges that define it
     edges: Vec<(Region, Region)>,
-    /// This maps shall contain an entry for all regions that are part of the graph, and give the
-    /// local that introduces this region, plus the source code of the corresponding line.
+    /// This map shall contain an entry for all regions that are part of the graph, and give the
+    /// local that introduces this region. (If it was found.)
     /// If the local is found, the first element shall be Some(the MIR of the local declaration),
-    /// otherwise it shall be None. If the local was found, the second element is the name of the
-    /// local (or something like "anonymous variable" if it has no name), and the last element is
+    /// otherwise it shall be None. Note that this field is not included when serializing this
+    /// structure to JSON, as mir::LocalDecl is not serializable.
+    #[serde(skip_serializing)]
+    locals_mir_for_regions: FxHashMap<Region, Option<mir::LocalDecl<'tcx>>>,
+    /// This map shall contain an entry for all regions that are part of the graph, and give
+    /// (textual) information for the local that introduces this region, i.e mainly the source
+    /// code of the corresponding line.
+    /// If the local is found, If the local was found, the first element is the name of the local
+    /// (or something like "anonymous variable" if it has no name), and the second element is
     /// intended to be the source line that introduced this local and hence the region. (both as
     /// text/String)
     /// The Strings shall be empty if the information was not found for an edge. (This is certainly
-    /// the case if the first element is None)
-    locals_for_regions: FxHashMap<Region, (Option<mir::LocalDecl<'tcx>>, String, String)>,
+    /// the case if the corresponding entry in locals_mir_for_regions is None)
+    /// This map will be included in a JSON dump of this structure.
+    locals_info_for_regions: FxHashMap<Region, (String, String)>,
     /// This maps from regions to a list of lines that are considered to be relevant for this region
     /// The information could have been obtained by using the method
     /// MirInfoPrinter::get_lines_for_region(...) with an appropriate map.
@@ -1392,7 +1439,17 @@ struct EnrichedErrorGraph<'tcx> {
     /// The information could have been obtained from the points that are associated with this edge
     /// in the outlives relation.
     /// The lines is always given as it's number (usize) and it's source code (text, String)
-    lines_for_edges: FxHashMap<(Region, Region), (usize, String)>
+    /// Since serde(_json) does dislike tuples as keys for maps when serializing (leads to error
+    /// "key must be a string"), this field will not be included in a JSON dump of this structure.
+    /// Instead, the simplified lines_for_edges_start will be included.
+    #[serde(skip_serializing)]
+    lines_for_edges: FxHashMap<(Region, Region), (usize, String)>,
+    /// This is the same as lines_for_edges, hence it maps from edges to a line that is considered
+    /// to be have created this edged/constraint.
+    /// However, it only identifies edges by the first region, i.e. the region the edge starts at.
+    /// Therefore, this map can (and will) be included when creating a JSON dump of this structure.
+    lines_for_edges_start: FxHashMap<Region, (usize, String)>
+
 }
 
 impl<'tcx> EnrichedErrorGraph<'tcx> {
@@ -1499,7 +1556,7 @@ impl<'tcx> EnrichedErrorGraph<'tcx> {
             // else: do nothing, since this is an entry or exit node/region
         };
 
-        for (reg, (local_decl_opt, _, _)) in self.locals_for_regions.iter() {
+        for (reg, local_decl_opt) in self.locals_mir_for_regions.iter() {
             match local_decl_opt {
                 None => remove_region_from_edges(reg),
                 Some(local_decl) => if local_decl.name.is_none() { remove_region_from_edges(reg) }
