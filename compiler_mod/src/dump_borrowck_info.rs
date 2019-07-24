@@ -1104,8 +1104,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let mut i = 0;
 
         for (region1, region2) in error_graph.edges.iter() {
-            let mut point_snip = String::default();
-
             let (local_name1, local_source1_snip) = &error_graph.locals_info_for_regions[region1];
             let (local_name2, local_source2_snip) = &error_graph.locals_info_for_regions[region2];
 

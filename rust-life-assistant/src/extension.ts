@@ -2,6 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { performance } from 'perf_hooks';
 import * as util from './util';
 import * as config from './config';
@@ -37,13 +38,173 @@ export function activate(context: vscode.ExtensionContext) {
 			const duration = Math.round((performance.now() - start) / 100) / 10;
 			vscode.window.setStatusBarMessage(`rust-life (compiler mod) terminated (${duration} s)`);
 
-			let result = require(path.join(config.rustLifeHome(context), "nll-facts", "error_graph.json"));
+			// This seems not to load the JXOn again on a second execution, leads to mess, try to read JSON differently.
+			// let result = require(path.join(config.rustLifeHome(context), "nll-facts", "error_graph.json"));
+			let jsonDumpPath = path.join(config.rustLifeHome(context), "nll-facts", "error_graph.json");
+			let rawData = fs.readFileSync(jsonDumpPath, 'utf8');
+			let result = JSON.parse(rawData);
 			return result;
 		} else {
 			util.log(
 				"The document is not a Rust program, thus rust-life (compiler mod) will not run on it."
 			);
 		}
+	}
+
+	/**
+	 * Takes an EnrichedErrorGraph structure (e.g. read from JSON dump from rust-life compiler mod) and displays it in
+	 * a newly created webView. (Note that these graphs actually are only a path.)
+	 * @param errorPath The EnrichedErrorGraph (version only containing fields that are included in JSON dump)
+	 * @returns The created webView, for eventual further usage and treatment.
+	 */
+	function showPathInPanel(errorPath: any) {
+		// TODO check if there already is a panel, only create a new one if there isn't, otherwise reuse old one.
+		// Create and show panel
+		const panel = vscode.window.createWebviewPanel(
+			'errorGraphView',
+			`Error Visualization for fn ${errorPath.function_name}`,
+			vscode.ViewColumn.Two,
+			{
+				enableScripts: true,
+			}
+		);
+
+		panel.webview.html = generateHtml(errorPath);
+
+		return panel;
+	}
+
+	/**
+	 * Render a EnrichedErrorGraph (e.g. read from JSON) as a complete HTML page (webview content) 
+	 * @param errorPath The EnrichedErrorGraph (version only containing fields that are included in JSON dump suffices)
+	 * @returns The generated HTML, as string
+	 */
+	function generateHtml(errorPath: any): string {
+		let html = `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Error Visualization for fn ${errorPath.function_name}</title>
+			<style>
+			table {
+				border-collapse: collapse;
+			}
+			table, th, td {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			th, td {
+				border: 1px solid;
+			}
+			.arrow {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+
+				padding: 0px;
+				margin: 0px;
+				font-size: 40px;
+				font-weight: bold;
+
+			}
+			</style>
+			<script>
+			function regionOnClick(region) {
+				console.log(\`Clicked on R\${region}\`);
+			}
+			function constraintOnClick(startRegion) {
+				console.log(\`Clicked on constraint, beginning at R\${startRegion}\`);
+			}
+			</script>
+		</head>
+		<body>`;
+
+		let cur_region: number = getFirstNode(errorPath.edges);
+		util.log(`cur_region: ${cur_region}`);
+
+		while(cur_region >= 0) {
+			let local_name: string = errorPath.locals_info_for_regions[cur_region][0];
+			let local_source_snip: string = errorPath.locals_info_for_regions[cur_region][1];
+			let region_lines_str = '';
+			errorPath.lines_for_regions[cur_region].forEach(function (line: Array<any>) {
+				region_lines_str += `<tr><td>${line[0]}: ${line[1].trim()}</td></tr>`;
+			});
+
+			if (local_source_snip.length > 0) {
+				html += `<table onclick="regionOnClick(${cur_region})">
+				<tr><th>Lifetime R${cur_region}</th></tr>
+				<tr><td>${local_name}: &amp;'$${cur_region}</td></tr>
+				<tr><td>${local_source_snip}</td></tr>
+				${region_lines_str}</table>`;
+			} else {
+				html += `<table onclick="regionOnClick(${cur_region})">
+				<tr><th>Lifetime R${cur_region}</th></tr>
+				<tr><td>${local_name}: &amp;'$${cur_region}</td></tr>
+				${region_lines_str}</table>`;
+			}
+
+			let next_region = getNextNode(errorPath.edges, cur_region);
+
+			if (next_region >= 0) {
+				// there is a next region, draw the constraint towards it.
+				html += `<p class=arrow>↓</p>`;
+
+				let ind = errorPath.lines_for_edges_start[cur_region][0];
+				let point_snip = errorPath.lines_for_edges_start[cur_region][1];
+
+				html += `<table onclick="constraintOnClick(${cur_region})">
+				<tr><th>Constraint</th></tr>
+				<tr><td>${next_region} may point to ${cur_region}</td></tr>
+				<tr><td> generated at line ${ind}:</td></tr>
+				<tr><td>${point_snip.trim()}</td></tr></table>`;
+
+				html += `<p class=arrow>↓</p>`;
+			}
+
+
+			cur_region = next_region;
+			util.log(`cur_region: ${cur_region}`);
+
+		}
+
+		html += `</body>`;
+		return html;
+	}
+
+	/**
+	 * Get a node with only outgoing and no ingoing edges from a graph, that is given as an array of edges.
+	 * (Nodes are actually regions, but for now just represented by their number.)
+	 * @param edges The edges of the graph, given as array or arrays (that are actually tuples with size two) of numbers
+	 * @returns The first node that is found. If nothing is found, (which would indicate an issue in the input, e.g. a
+	 * cycle.) -1 is returned.
+	 */
+	function getFirstNode(edges: Array<Array<number>>): number {
+		for (let edge of edges) {
+			if (edges.findIndex(inner_edge => {
+				return edge[0] === inner_edge[1];
+			}) < 0) {
+				return edge[0];
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Function that takes a graph, as set of edges, and gets a node that is a direct successor of the one that is
+	 * passed as start.
+	 * @param edges The graph, given as set of edges, with (unique) positive numbers (integers) as nodes.
+	 * @param start The node (it's number) that we need a successor of.
+	 * @returns The number of the successor node, or -1 if none is found
+	 */
+	function getNextNode(edges: Array<Array<number>>, start: number): number {
+		for (let edge of edges) {
+			if (edge[0] === start) {
+				return edge[1];
+			}
+		}
+		return -1;
 	}
 
 	// The command has been defined in the package.json file
@@ -65,13 +226,16 @@ export function activate(context: vscode.ExtensionContext) {
 			util.log("vscode.window.activeTextEditor is not ready yet.");
 		}
 		if (errorPath == null) {
-			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.');
+			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
+			Is the your target rust file opened in the active tab?');
 			// give up, return from the command callback:
 			return;
 		}
 		util.log(errorPath);
 
 		vscode.window.showInformationMessage(`Currently handled function: ${errorPath.function_name}`);
+
+		const visualizationPanel = showPathInPanel(errorPath);
 	});
 
 	context.subscriptions.push(disposable);
