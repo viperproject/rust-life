@@ -51,6 +51,91 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}
 
+	class OnClickHandler {
+		errorPath: any;
+
+		/**
+		 * Constructor, setting the error path (must be the version that was dumped to JSON by rust-life/compiler mod)
+		 * @param ep The error path structure.
+		 */
+		constructor(ep: any) {
+			this.errorPath = ep;
+		}
+
+		/**
+		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed region
+		 * @param region The region, as number
+		 * @returns The line number, or -1 if the information was not found.
+		 */
+		private getLineForRegion(region: number): number {
+			if (this.errorPath.locals_info_for_regions[region] && this.errorPath.locals_info_for_regions[region][0] !== '') {
+				// TODO There is information about the locale, get information about the line number from it (must first be emitted?)
+			} else if (this.errorPath.lines_for_regions[region] && this.errorPath.lines_for_regions[region].length >= 1) {
+				// There is "extra" line info, get the line number form it.
+				if (this.errorPath.lines_for_regions[region][0].length >= 1) {
+					// Safety check, by def the length should always be 2
+					return this.errorPath.lines_for_regions[region][0][0]
+				} {
+					console.error(`Entry in this.errorPath.lines_for_regions[${region}] does exist, but is to short!`);
+				}
+			}
+			return -1;
+		}
+
+		/**
+		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed
+		 * constraint, identified by it's edge's first region.
+		 * @param region The region identifying the constraint, as number
+		 * @returns The line number, or -1 if the information was not found.
+		 */
+		private getLineForConstraint(region: number) {
+			if (this.errorPath.lines_for_edges_start[region] &&
+				this.errorPath.lines_for_edges_start[region].length >= 1) {
+					// The length check is only for extra safety, it should always be 2.
+					return this.errorPath.lines_for_edges_start[region][0];
+				} else if (this.errorPath.lines_for_edges_start[region]) {
+					console.error(`Entry in errorPath.lines_for_edges_start[${region}] does exist, but is to short!`);
+				}
+
+			return -1;
+		}
+
+		/**
+		 * Highlight a line of source code in the editor for a given region.
+		 * @param region The region
+		 */
+		private highlightForRegion(region: number) {
+			let lineNr = this.getLineForRegion(region);
+
+			util.log(`Highlighting region ${region}: mapped to line ${lineNr}`);
+
+		}
+
+		/**
+		 * Highlight a line of source code in the editor for a given constraint, defined by it's start region.
+		 * @param region The start region
+		 */
+		private highlightForConstraint(region: number) {
+			let lineNr = this.getLineForConstraint(region);
+
+			util.log(`Highlighting constraint ${region}: mapped to line ${lineNr}`);
+
+		}
+
+		/**
+		 * Function that is registered as callback when a message from the webView arrives. (Hence, this method is called
+		 * in this case and will deal with incoming messages.)
+		 * @param message The message that was passed.
+		 */
+		public handleWebViewMsg(message: any) {
+			switch(message.command) {
+				case('highlight_region'): this.highlightForRegion(message.region); break;
+				case('highlight_constraint'): this.highlightForConstraint(message.region); break;
+			}
+			util.log(`Received message from WebView:`);
+			util.log(message);
+		}
+	}
 	/**
 	 * Takes an EnrichedErrorGraph structure (e.g. read from JSON dump from rust-life compiler mod) and displays it in
 	 * a newly created webView. (Note that these graphs actually are only a path.)
@@ -70,6 +155,9 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 
 		panel.webview.html = generateHtml(errorPath);
+
+		let onClickHandler = new OnClickHandler(errorPath);
+		panel.webview.onDidReceiveMessage(onClickHandler.handleWebViewMsg, onClickHandler, context.subscriptions);
 
 		return panel;
 	}
@@ -111,11 +199,21 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			</style>
 			<script>
+			// TODO this might not be too good style, but it does work.
+			const vscode = acquireVsCodeApi();
 			function regionOnClick(region) {
 				console.log(\`Clicked on R\${region}\`);
+				vscode.postMessage({
+					command: 'highlight_region',
+					region: \`\${region}\`,
+				})
 			}
 			function constraintOnClick(startRegion) {
 				console.log(\`Clicked on constraint, beginning at R\${startRegion}\`);
+				vscode.postMessage({
+					command: 'highlight_constraint',
+					region: \`\${startRegion}\`,
+				})
 			}
 			</script>
 		</head>
