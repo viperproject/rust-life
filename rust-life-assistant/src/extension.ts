@@ -53,13 +53,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 	class OnClickHandler {
 		errorPath: any;
+		editor: vscode.TextEditor;
+		yellowBgDecoration = vscode.window.createTextEditorDecorationType({
+			backgroundColor: 'yellow',
+		});
 
 		/**
 		 * Constructor, setting the error path (must be the version that was dumped to JSON by rust-life/compiler mod)
 		 * @param ep The error path structure.
 		 */
-		constructor(ep: any) {
+		constructor(ep: any, editor: vscode.TextEditor) {
 			this.errorPath = ep;
+			this.editor =  editor;
 		}
 
 		/**
@@ -74,7 +79,7 @@ export function activate(context: vscode.ExtensionContext) {
 				// There is "extra" line info, get the line number form it.
 				if (this.errorPath.lines_for_regions[region][0].length >= 1) {
 					// Safety check, by def the length should always be 2
-					return this.errorPath.lines_for_regions[region][0][0]
+					return this.errorPath.lines_for_regions[region][0][0];
 				} {
 					console.error(`Entry in this.errorPath.lines_for_regions[${region}] does exist, but is to short!`);
 				}
@@ -101,6 +106,28 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		/**
+		 * Highligh a line, in yellow colour, by using yellowBgDecoration and setting the range for this line as the one
+		 * that shall be highlighted. Note that this will overwritten, and hence remove any previous highlighting.
+		 * The highlighting is done on the editor that is given as field of this class instance.
+		 * @param lineNr the number of the line, as line number when counting (indexing) starting from 1. (As in the
+		 * EnrichedErrorGraph JSON dump.) It must be strictly bigger then 0, and never strictly bigger then the number of
+		 * lines of the document of this.editor. (If such an invalid value is passed, the method will do nothing, and
+		 * report this to the log.)
+		 */
+		highlightLine(lineNr: number) {
+			if (lineNr <= 0 || lineNr > this.editor.document.lineCount) {
+				util.log(`Cannot highligh line ${lineNr}, this is not a valid line number in the current source.`);
+				return;
+			}
+			let line = lineNr - 1;
+			let lastCharIndex =  this.editor.document.lineAt(line).text.length;
+			let range = new vscode.Range(line, 0, line, lastCharIndex);
+			let decorationsArray: vscode.DecorationOptions[] = [];
+			decorationsArray.push({ range });
+			this.editor.setDecorations(this.yellowBgDecoration, decorationsArray);
+		}
+
+		/**
 		 * Highlight a line of source code in the editor for a given region.
 		 * @param region The region
 		 */
@@ -108,6 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 			let lineNr = this.getLineForRegion(region);
 
 			util.log(`Highlighting region ${region}: mapped to line ${lineNr}`);
+			this.highlightLine(lineNr);
 
 		}
 
@@ -119,6 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
 			let lineNr = this.getLineForConstraint(region);
 
 			util.log(`Highlighting constraint ${region}: mapped to line ${lineNr}`);
+			this.highlightLine(lineNr);
 
 		}
 
@@ -128,21 +157,24 @@ export function activate(context: vscode.ExtensionContext) {
 		 * @param message The message that was passed.
 		 */
 		public handleWebViewMsg(message: any) {
+			util.log(`Received message from WebView:`);
+			util.log(message);
+
 			switch(message.command) {
 				case('highlight_region'): this.highlightForRegion(message.region); break;
 				case('highlight_constraint'): this.highlightForConstraint(message.region); break;
 			}
-			util.log(`Received message from WebView:`);
-			util.log(message);
 		}
 	}
 	/**
 	 * Takes an EnrichedErrorGraph structure (e.g. read from JSON dump from rust-life compiler mod) and displays it in
 	 * a newly created webView. (Note that these graphs actually are only a path.)
 	 * @param errorPath The EnrichedErrorGraph (version only containing fields that are included in JSON dump)
+	 * @param editor The text editor ("window") that the source for this error is displayed in, is needed for
+	 * highlighting lines.
 	 * @returns The created webView, for eventual further usage and treatment.
 	 */
-	function showPathInPanel(errorPath: any) {
+	function showPathInPanel(errorPath: any, editor: vscode.TextEditor) {
 		// TODO check if there already is a panel, only create a new one if there isn't, otherwise reuse old one.
 		// Create and show panel
 		const panel = vscode.window.createWebviewPanel(
@@ -156,7 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		panel.webview.html = generateHtml(errorPath);
 
-		let onClickHandler = new OnClickHandler(errorPath);
+		let onClickHandler = new OnClickHandler(errorPath, editor);
 		panel.webview.onDidReceiveMessage(onClickHandler.handleWebViewMsg, onClickHandler, context.subscriptions);
 
 		return panel;
@@ -317,23 +349,24 @@ export function activate(context: vscode.ExtensionContext) {
 		// get the name of the currently opened file and run rust life on it, getting back the error path (graph):
 		let errorPath;
 		if (vscode.window.activeTextEditor) {
+			let editor = vscode.window.activeTextEditor;
 			errorPath = await runRustLife(
-				vscode.window.activeTextEditor.document
+				editor.document
 			);
+			if (errorPath == null) {
+				vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
+				Is the your target rust file opened in the active tab?');
+				// give up, return from the command callback:
+				return;
+			}
+			util.log(errorPath);
+
+			vscode.window.showInformationMessage(`Currently handled function: ${errorPath.function_name}`);
+
+			const visualizationPanel = showPathInPanel(errorPath, editor);
 		} else {
 			util.log("vscode.window.activeTextEditor is not ready yet.");
 		}
-		if (errorPath == null) {
-			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
-			Is the your target rust file opened in the active tab?');
-			// give up, return from the command callback:
-			return;
-		}
-		util.log(errorPath);
-
-		vscode.window.showInformationMessage(`Currently handled function: ${errorPath.function_name}`);
-
-		const visualizationPanel = showPathInPanel(errorPath);
 	});
 
 	context.subscriptions.push(disposable);
