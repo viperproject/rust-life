@@ -68,20 +68,23 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		/**
-		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed region
+		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed region.
 		 * @param region The region, as number
-		 * @returns The line number, or -1 if the information was not found.
+		 * @returns The line number, or -1 if the information was not found. This line number is indexed from 1, i.e.
+		 * analogous to line numbering in an editor window. (As defined by the documentation of the EnrichedErrorGraph)
 		 */
 		private getLineForRegion(region: number): number {
-			if (this.errorPath.locals_info_for_regions[region] && this.errorPath.locals_info_for_regions[region][0] !== '') {
-				// TODO There is information about the locale, get information about the line number from it (must first be emitted?)
-			} else if (this.errorPath.lines_for_regions[region] && this.errorPath.lines_for_regions[region].length >= 1) {
+			if (this.errorPath.locals_info_for_regions[region] &&
+				this.errorPath.locals_info_for_regions[region][0] > 0) {
+				return this.errorPath.locals_info_for_regions[region][0];
+			} else if (this.errorPath.lines_for_regions[region] &&
+					this.errorPath.lines_for_regions[region].length >= 1) {
 				// There is "extra" line info, get the line number form it.
 				if (this.errorPath.lines_for_regions[region][0].length >= 1) {
 					// Safety check, by def the length should always be 2
 					return this.errorPath.lines_for_regions[region][0][0];
-				} {
-					console.error(`Entry in this.errorPath.lines_for_regions[${region}] does exist, but is to short!`);
+				} else {
+					console.error(`Entry in this.errorPath.lines_for_regions[${region}] does exist, but is too short!`);
 				}
 			}
 			return -1;
@@ -91,7 +94,8 @@ export function activate(context: vscode.ExtensionContext) {
 		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed
 		 * constraint, identified by it's edge's first region.
 		 * @param region The region identifying the constraint, as number
-		 * @returns The line number, or -1 if the information was not found.
+		 * @returns The line number, or -1 if the information was not found. This line number is indexed from 1, i.e.
+		 * analogous to line numbering in an editor window. (As defined by the documentation of the EnrichedErrorGraph)
 		 */
 		private getLineForConstraint(region: number) {
 			if (this.errorPath.lines_for_edges_start[region] &&
@@ -255,8 +259,9 @@ export function activate(context: vscode.ExtensionContext) {
 		util.log(`cur_region: ${cur_region}`);
 
 		while(cur_region >= 0) {
-			let local_name: string = errorPath.locals_info_for_regions[cur_region][0];
-			let local_source_snip: string = errorPath.locals_info_for_regions[cur_region][1];
+			let local_line_nr = errorPath.locals_info_for_regions[cur_region][0];
+			let local_name: string = errorPath.locals_info_for_regions[cur_region][1];
+			let local_source_snip: string = errorPath.locals_info_for_regions[cur_region][2];
 			let region_lines_str = '';
 			errorPath.lines_for_regions[cur_region].forEach(function (line: Array<any>) {
 				region_lines_str += `<tr><td>${line[0]}: ${line[1].trim()}</td></tr>`;
@@ -265,13 +270,13 @@ export function activate(context: vscode.ExtensionContext) {
 			if (local_source_snip.length > 0) {
 				html += `<table onclick="regionOnClick(${cur_region})">
 				<tr><th>Lifetime R${cur_region}</th></tr>
-				<tr><td>${local_name}: &amp;'$${cur_region}</td></tr>
-				<tr><td>${local_source_snip}</td></tr>
+				<tr><td>${local_name}: &amp;'R${cur_region}</td></tr>
+				<tr><td>${local_line_nr}: ${local_source_snip}</td></tr>
 				${region_lines_str}</table>`;
 			} else {
 				html += `<table onclick="regionOnClick(${cur_region})">
 				<tr><th>Lifetime R${cur_region}</th></tr>
-				<tr><td>${local_name}: &amp;'$${cur_region}</td></tr>
+				<tr><td>${local_name}: &amp;'R${cur_region}</td></tr>
 				${region_lines_str}</table>`;
 			}
 
@@ -286,7 +291,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 				html += `<table onclick="constraintOnClick(${cur_region})">
 				<tr><th>Constraint</th></tr>
-				<tr><td>${next_region} may point to ${cur_region}</td></tr>
+				<tr><td>R${next_region} may point to R${cur_region}</td></tr>
 				<tr><td> generated at line ${ind}:</td></tr>
 				<tr><td>${point_snip.trim()}</td></tr></table>`;
 

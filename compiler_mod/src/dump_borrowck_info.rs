@@ -1104,8 +1104,8 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
         let mut i = 0;
 
         for (region1, region2) in error_graph.edges.iter() {
-            let (local_name1, local_source1_snip) = &error_graph.locals_info_for_regions[region1];
-            let (local_name2, local_source2_snip) = &error_graph.locals_info_for_regions[region2];
+            let (line_number1, local_name1, local_source1_snip) = &error_graph.locals_info_for_regions[region1];
+            let (line_number2, local_name2, local_source2_snip) = &error_graph.locals_info_for_regions[region2];
 
             let (ind, point_snip) = &error_graph.lines_for_edges[&(*region1, *region2)];
 
@@ -1119,13 +1119,13 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             }
 
             if *local_source1_snip != String::default(){
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr>{}</table>> ]", region1, region1, local_name1, region1, local_source1_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region1_lines_str);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}: {}</td></tr>{}</table>> ]", region1, region1, local_name1, region1, line_number1, local_source1_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region1_lines_str);
             }else {
                 writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr>{}</table>> ]", region1, region1, local_name1, region1, region1_lines_str
                 );
             }
             if *local_source2_snip != String::default(){
-                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr>{}</table>> ]", region2, region2, local_name2, region2, local_source2_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region2_lines_str);
+                writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}: {}</td></tr>{}</table>> ]", region2, region2, local_name2, region2, line_number2, local_source2_snip.trim().replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"), region2_lines_str);
             }else {
                 writeln!(graph_file, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr>{}</table>> ]", region2, region2, local_name2, region2, region2_lines_str);
             }
@@ -1234,14 +1234,14 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         for ((r1, r2), pts) in graph_information.iter() {
             if ! locals_info_for_regions.contains_key(r1) {
-                let (local_decl, local_name, local_src) = self.find_local_for_region(r1);
+                let (local_decl, line_number, local_name, local_src) = self.find_local_for_region(r1);
                 locals_mir_for_regions.insert(*r1, local_decl);
-                locals_info_for_regions.insert(*r1, (local_name, local_src));
+                locals_info_for_regions.insert(*r1, (line_number, local_name, local_src));
             }
             if ! locals_info_for_regions.contains_key(r2) {
-                let (local_decl, local_name, local_src) = self.find_local_for_region(r2);
+                let (local_decl, line_number, local_name, local_src) = self.find_local_for_region(r2);
                 locals_mir_for_regions.insert(*r2, local_decl);
-                locals_info_for_regions.insert(*r2, (local_name, local_src));
+                locals_info_for_regions.insert(*r2, (line_number, local_name, local_src));
             }
             let line_for_egge_points = self.find_first_line_for_points(pts);
             lines_for_edges.insert((*r1, *r2), line_for_egge_points.clone());
@@ -1326,15 +1326,21 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
     /// This function takes a Region and (tries to) map it to a local that introduced this region,
     /// using the region_to_local_map from self.
-    /// It will return the a tuple of Strings. The first is the name of the local, and the second
-    /// the source code (text) that introduced this local and hence it's connection to the region.
+    /// It will return four elements: The first is an option: If the local was found, this is
+    /// Option(<MIR structure for the local>), otherwise it will be None.
+    /// The second value is the line number (indexed from 1, i.e link when counting lines in an
+    /// editor etc.) where the local was found, or usize::default() if it was not found.
+    /// Last, there are two Strings. The first is the name of the local, and the second the source
+    /// code (text) that introduced this local and hence it's connection to the region.
     /// If the found local has no name, the text "anonymous variable" is returned instead.
     /// If the mapping to a local fails, an empty string is returned as name and as source, and an
     /// message informing about this is logged at debug level. In addition, in this case, or when
-    /// the mapping to a source code snipped fails, an empty string will be returned as well.
-    fn find_local_for_region(&self, reg: &Region) -> (Option<mir::LocalDecl>, String, String) {
+    /// the mapping to a source code snipped fails, an empty string will be returned for the source
+    /// code as well.
+    fn find_local_for_region(&self, reg: &Region) -> (Option<mir::LocalDecl>, usize, String, String) {
         let mut local_name = String::default();
         let mut local_source = syntax_pos::DUMMY_SP;
+        let mut line_number = usize::default();
         let mut local_source_snip = String::default();
         let mut local_decl_option = None;
 
@@ -1362,12 +1368,13 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 }
             }
             let fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source.lo()).unwrap();
+            line_number = fm_ln1.line + 1;
             local_source_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
             local_decl_option = Some(local_decl.clone());
         } else {
             debug!("No locale (and hence no extra details) found for region={:?}", reg);
         }
-        (local_decl_option, local_name, local_source_snip)
+        (local_decl_option, line_number, local_name, local_source_snip)
     }
 
     /// This function takes a set of points, and returns the first line (line on the lowest line)
@@ -1430,14 +1437,16 @@ struct EnrichedErrorGraph<'tcx> {
     /// This map shall contain an entry for all regions that are part of the graph, and give
     /// (textual) information for the local that introduces this region, i.e mainly the source
     /// code of the corresponding line.
-    /// If the local is found, If the local was found, the first element is the name of the local
-    /// (or something like "anonymous variable" if it has no name), and the second element is
-    /// intended to be the source line that introduced this local and hence the region. (both as
-    /// text/String)
-    /// The Strings shall be empty if the information was not found for an edge. (This is certainly
-    /// the case if the corresponding entry in locals_mir_for_regions is None)
+    /// If the local is found, the first element shall be the line number where this local is
+    /// defined. (Indexed from 1, i.e. like counting lines in an editor) The second element is the
+    /// name of the local (or something like "anonymous variable" if it has no name), and the third
+    /// element is intended to be the source line that introduced this local and hence the region.
+    /// (both as text/String)
+    /// The number shall be usize::default() and the Strings shall be empty if the information was
+    /// not found for an edge. (This is certainly the case if the corresponding entry in
+    /// locals_mir_for_regions is None)
     /// This map will be included in a JSON dump of this structure.
-    locals_info_for_regions: FxHashMap<Region, (String, String)>,
+    locals_info_for_regions: FxHashMap<Region, (usize, String, String)>,
     /// This maps from regions to a list of lines that are considered to be relevant for this region
     /// The information could have been obtained by using the method
     /// MirInfoPrinter::get_lines_for_region(...) with an appropriate map.
