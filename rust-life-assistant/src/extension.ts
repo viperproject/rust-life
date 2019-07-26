@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import { performance } from 'perf_hooks';
 import * as util from './util';
 import * as config from './config';
+import { on } from 'cluster';
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -54,6 +55,9 @@ export function activate(context: vscode.ExtensionContext) {
 	class OnClickHandler {
 		errorPath: any;
 		editor: vscode.TextEditor;
+		fileUri: vscode.Uri;
+		curLineNr: number;
+
 		yellowBgDecoration = vscode.window.createTextEditorDecorationType({
 			backgroundColor: 'yellow',
 		});
@@ -65,6 +69,8 @@ export function activate(context: vscode.ExtensionContext) {
 		constructor(ep: any, editor: vscode.TextEditor) {
 			this.errorPath = ep;
 			this.editor =  editor;
+			this.fileUri = editor.document.uri;
+			this.curLineNr = -2;
 		}
 
 		/**
@@ -110,8 +116,8 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		/**
-		 * Highligh a line, in yellow colour, by using yellowBgDecoration and setting the range for this line as the one
-		 * that shall be highlighted. Note that this will overwritten, and hence remove any previous highlighting.
+		 * Highlight a line, in yellow colour, by using yellowBgDecoration and setting the range for this line as the
+		 * one that shall be highlighted. Note that this will overwritten, and hence remove any previous highlighting.
 		 * The highlighting is done on the editor that is given as field of this class instance.
 		 * @param lineNr the number of the line, as line number when counting (indexing) starting from 1. (As in the
 		 * EnrichedErrorGraph JSON dump.) It must be strictly bigger then 0, and never strictly bigger then the number of
@@ -123,6 +129,7 @@ export function activate(context: vscode.ExtensionContext) {
 				util.log(`Cannot highligh line ${lineNr}, this is not a valid line number in the current source.`);
 				return;
 			}
+			this.curLineNr = lineNr;
 			let line = lineNr - 1;
 			let lastCharIndex =  this.editor.document.lineAt(line).text.length;
 			let range = new vscode.Range(line, 0, line, lastCharIndex);
@@ -169,6 +176,24 @@ export function activate(context: vscode.ExtensionContext) {
 				case('highlight_constraint'): this.highlightForConstraint(message.region); break;
 			}
 		}
+
+		/**
+		 * This function must be called when the active text editor changed (back to the one that shall contain the
+		 * highlighting, or that shows the file that the highlighting is for.)
+		 * This will check if there is an active highlight for this callback (curLineNr is bigger then -2), and if the
+		 * editor that is passed is showing the file that this highlight is for. If so, it will re-apply the
+		 * highlighting to the editor.
+		 * In this case, the function will also update the editor field of the class instance to point to the new
+		 * editor, to allow future highlight requests to work.
+		 * Note that this function also works when called with an undefined argument, but will do nothing in this case.
+		 * This is to be directly registrable as callback for window.onDidChangeActiveTextEditor
+		 */
+		public checkRestoreHighlight(newEditor: vscode.TextEditor | undefined) {
+			if (newEditor && this.curLineNr > -2 && newEditor.document.uri === this.fileUri) {
+				this.editor = newEditor;
+				this.highlightLine(this.curLineNr);
+			}
+		}
 	}
 	/**
 	 * Takes an EnrichedErrorGraph structure (e.g. read from JSON dump from rust-life compiler mod) and displays it in
@@ -194,6 +219,18 @@ export function activate(context: vscode.ExtensionContext) {
 
 		let onClickHandler = new OnClickHandler(errorPath, editor);
 		panel.webview.onDidReceiveMessage(onClickHandler.handleWebViewMsg, onClickHandler, context.subscriptions);
+
+		let textEditorChangeDisposable = vscode.window.onDidChangeActiveTextEditor(onClickHandler.checkRestoreHighlight,
+			onClickHandler);
+
+		let documentUri = editor.document.uri;
+		panel.onDidDispose(undefined => {
+			textEditorChangeDisposable.dispose();
+			// guess there is no need to dispose the listener onDidReceiveMessage, since is is part of the panel that is
+			// disposed anyway right now.
+		},
+		undefined,
+		context.subscriptions);
 
 		return panel;
 	}
