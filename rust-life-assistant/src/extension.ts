@@ -53,7 +53,6 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	class OnClickHandler {
-		errorPath: any;
 		editor: vscode.TextEditor;
 		fileUri: vscode.Uri;
 		curLineNr: number;
@@ -66,53 +65,10 @@ export function activate(context: vscode.ExtensionContext) {
 		 * Constructor, setting the error path (must be the version that was dumped to JSON by rust-life/compiler mod)
 		 * @param ep The error path structure.
 		 */
-		constructor(ep: any, editor: vscode.TextEditor) {
-			this.errorPath = ep;
+		constructor(editor: vscode.TextEditor) {
 			this.editor =  editor;
 			this.fileUri = editor.document.uri;
 			this.curLineNr = -2;
-		}
-
-		/**
-		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed region.
-		 * @param region The region, as number
-		 * @returns The line number, or -1 if the information was not found. This line number is indexed from 1, i.e.
-		 * analogous to line numbering in an editor window. (As defined by the documentation of the EnrichedErrorGraph)
-		 */
-		private getLineForRegion(region: number): number {
-			if (this.errorPath.locals_info_for_regions[region] &&
-				this.errorPath.locals_info_for_regions[region][0] > 0) {
-				return this.errorPath.locals_info_for_regions[region][0];
-			} else if (this.errorPath.lines_for_regions[region] &&
-					this.errorPath.lines_for_regions[region].length >= 1) {
-				// There is "extra" line info, get the line number form it.
-				if (this.errorPath.lines_for_regions[region][0].length >= 1) {
-					// Safety check, by def the length should always be 2
-					return this.errorPath.lines_for_regions[region][0][0];
-				} else {
-					console.error(`Entry in this.errorPath.lines_for_regions[${region}] does exist, but is too short!`);
-				}
-			}
-			return -1;
-		}
-
-		/**
-		 * Read the errorPath data, and find the line information (line number) that corresponds to the passed
-		 * constraint, identified by it's edge's first region.
-		 * @param region The region identifying the constraint, as number
-		 * @returns The line number, or -1 if the information was not found. This line number is indexed from 1, i.e.
-		 * analogous to line numbering in an editor window. (As defined by the documentation of the EnrichedErrorGraph)
-		 */
-		private getLineForConstraint(region: number) {
-			if (this.errorPath.lines_for_edges_start[region] &&
-				this.errorPath.lines_for_edges_start[region].length >= 1) {
-					// The length check is only for extra safety, it should always be 2.
-					return this.errorPath.lines_for_edges_start[region][0];
-				} else if (this.errorPath.lines_for_edges_start[region]) {
-					console.error(`Entry in errorPath.lines_for_edges_start[${region}] does exist, but is to short!`);
-				}
-
-			return -1;
 		}
 
 		/**
@@ -139,30 +95,6 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		/**
-		 * Highlight a line of source code in the editor for a given region.
-		 * @param region The region
-		 */
-		private highlightForRegion(region: number) {
-			let lineNr = this.getLineForRegion(region);
-
-			util.log(`Highlighting region ${region}: mapped to line ${lineNr}`);
-			this.highlightLine(lineNr);
-
-		}
-
-		/**
-		 * Highlight a line of source code in the editor for a given constraint, defined by it's start region.
-		 * @param region The start region
-		 */
-		private highlightForConstraint(region: number) {
-			let lineNr = this.getLineForConstraint(region);
-
-			util.log(`Highlighting constraint ${region}: mapped to line ${lineNr}`);
-			this.highlightLine(lineNr);
-
-		}
-
-		/**
 		 * Function that is registered as callback when a message from the webView arrives. (Hence, this method is called
 		 * in this case and will deal with incoming messages.)
 		 * @param message The message that was passed.
@@ -172,8 +104,8 @@ export function activate(context: vscode.ExtensionContext) {
 			util.log(message);
 
 			switch(message.command) {
-				case('highlight_region'): this.highlightForRegion(message.region); break;
-				case('highlight_constraint'): this.highlightForConstraint(message.region); break;
+				case('highlight_line'): this.highlightLine(message.lineNr); break;
+				default: console.error("Received a unknown command from the WebView, this is most likely a bug!");
 			}
 		}
 
@@ -195,6 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 	}
+
 	/**
 	 * Takes an EnrichedErrorGraph structure (e.g. read from JSON dump from rust-life compiler mod) and displays it in
 	 * a newly created webView. (Note that these graphs actually are only a path.)
@@ -217,7 +150,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		panel.webview.html = generateHtml(errorPath);
 
-		let onClickHandler = new OnClickHandler(errorPath, editor);
+		let onClickHandler = new OnClickHandler(editor);
 		panel.webview.onDidReceiveMessage(onClickHandler.handleWebViewMsg, onClickHandler, context.subscriptions);
 
 		let textEditorChangeDisposable = vscode.window.onDidChangeActiveTextEditor(onClickHandler.checkRestoreHighlight,
@@ -274,18 +207,17 @@ export function activate(context: vscode.ExtensionContext) {
 			<script>
 			// TODO this might not be too good style, but it does work.
 			const vscode = acquireVsCodeApi();
-			function regionOnClick(region) {
-				console.log(\`Clicked on R\${region}\`);
+			/**
+			 * This function does pass a message back to the IDE extension (that owns this WebView) to request
+			 * highlighting a certain line in the text editor.
+			 * @param lineNr The number of the line that shall be highlighted, indexed from 1, i.e. like when counting
+			 * line numbers in an editor window.
+			 */
+			function requestLineHighlight(lineNr) {
+				console.log(\`User requested a highlight of line \${lineNr}\`);
 				vscode.postMessage({
-					command: 'highlight_region',
-					region: \`\${region}\`,
-				})
-			}
-			function constraintOnClick(startRegion) {
-				console.log(\`Clicked on constraint, beginning at R\${startRegion}\`);
-				vscode.postMessage({
-					command: 'highlight_constraint',
-					region: \`\${startRegion}\`,
+					command: 'highlight_line',
+					lineNr: \`\${lineNr}\`,
 				})
 			}
 			</script>
@@ -300,19 +232,29 @@ export function activate(context: vscode.ExtensionContext) {
 			let local_name: string = errorPath.locals_info_for_regions[cur_region][1];
 			let local_source_snip: string = errorPath.locals_info_for_regions[cur_region][2];
 			let region_lines_str = '';
+			let line_nr_from_lines_for_regions = -1;
 			errorPath.lines_for_regions[cur_region].forEach(function (line: Array<any>) {
+				if (line_nr_from_lines_for_regions < 0) {
+					line_nr_from_lines_for_regions = line[0];
+				}
 				region_lines_str += `<tr><td>${line[0]}: ${line[1].trim()}</td></tr>`;
 			});
 
 			if (local_source_snip.length > 0) {
-				html += `<table onclick="regionOnClick(${cur_region})">
+				html += `<table onclick="requestLineHighlight(${local_line_nr})">
 				<tr><th>Lifetime R${cur_region}</th></tr>
 				<tr><td>${local_name}: &amp;'R${cur_region}</td></tr>
 				<tr><td>${local_line_nr}: ${local_source_snip}</td></tr>
 				${region_lines_str}</table>`;
 			} else {
-				html += `<table onclick="regionOnClick(${cur_region})">
-				<tr><th>Lifetime R${cur_region}</th></tr>
+				if (local_line_nr >= 1) {
+					html += `<table onclick="requestLineHighlight(${local_line_nr})">`;
+				} else if (line_nr_from_lines_for_regions >= 0) {
+					html += `<table onclick="requestLineHighlight(${line_nr_from_lines_for_regions})"`;
+				} else {
+					html += `<table onclick="alert(\\"Mapping to a line number failed for this region, highlighting not possible!\\")"`;
+				}
+				html += `<tr><th>Lifetime R${cur_region}</th></tr>
 				<tr><td>${local_name}: &amp;'R${cur_region}</td></tr>
 				${region_lines_str}</table>`;
 			}
@@ -326,7 +268,7 @@ export function activate(context: vscode.ExtensionContext) {
 				let ind = errorPath.lines_for_edges_start[cur_region][0];
 				let point_snip = errorPath.lines_for_edges_start[cur_region][1];
 
-				html += `<table onclick="constraintOnClick(${cur_region})">
+				html += `<table onclick="requestLineHighlight(${ind})">
 				<tr><th>Constraint</th></tr>
 				<tr><td>R${next_region} may point to R${cur_region}</td></tr>
 				<tr><td> generated at line ${ind}:</td></tr>
