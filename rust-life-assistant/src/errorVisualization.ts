@@ -112,6 +112,9 @@ export abstract class Visualization {
 	protected abstract generateHtml(): string;
 }
 
+/**
+ * @class Implements the Visualization of the error (path) as a graph.
+ */
 export class GraphVisualization extends Visualization {
 	/**
 	 * Render a EnrichedErrorGraph (e.g. read from JSON) as a complete HTML page (webview content)
@@ -126,7 +129,7 @@ export class GraphVisualization extends Visualization {
 		<head>
 			<meta charset="UTF-8">
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<title>Error Visualization for fn ${this.errorPath.function_name}</title>
+			<title>Error visualization for fn ${this.errorPath.function_name}</title>
 			<style>
 			table {
 				border-collapse: collapse;
@@ -199,7 +202,8 @@ export class GraphVisualization extends Visualization {
 				} else if (line_nr_from_lines_for_regions >= 0) {
 					html += `<table onclick="requestLineHighlight(${line_nr_from_lines_for_regions})"`;
 				} else {
-					html += `<table onclick="alert(\\"Mapping to a line number failed for this region, highlighting not possible!\\")"`;
+					console.warn(`Mapping to a line failed for region R${cur_region}`);
+					html += `<table onclick="console.error('Mapping to a line number failed for this region, highlighting not possible!')"`;
 				}
 				html += `<tr><th>Lifetime R${cur_region}</th></tr>
 				<tr><td>${local_name}: &amp;'R${cur_region}</td></tr>
@@ -232,6 +236,131 @@ export class GraphVisualization extends Visualization {
 
 		html += `</body>`;
 		return html;
+	}
+}
+
+/**
+ * @class Display the error (path) as a textual representation.
+ */
+export class TextualVisualization extends Visualization {
+	/**
+	 * Render a EnrichedErrorGraph (e.g. read from JSON) as a complete HTML page (webview content)
+	 * It will use the field Visualization.errorPath field as EnrichedErrorGraph (version only containing fields that
+	 * are included in JSON dump suffices) to get the information it needs for creating the HTML.
+	 * @returns The generated HTML, as string. This will be valid HTML that a vscode.WebViewPanel.webview.html can be
+	 * set to.
+	 */
+	protected generateHtml(): string {
+		let html = `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1.0">
+			<title>Error explanation for fn ${this.errorPath.function_name}</title>
+			<style>
+			</style>
+			<script>
+			// TODO this might not be too good style, but it does work.
+			const vscode = acquireVsCodeApi();
+			/**
+			 * This function does pass a message back to the IDE extension (that owns this WebView) to request
+			 * highlighting a certain line in the text editor.
+			 * @param lineNr The number of the line that shall be highlighted, indexed from 1, i.e. like when counting
+			 * line numbers in an editor window.
+			 */
+			function requestLineHighlight(lineNr) {
+				console.log(\`User requested a highlight of line \${lineNr}\`);
+				vscode.postMessage({
+					command: 'highlight_line',
+					lineNr: \`\${lineNr}\`,
+				})
+			}
+			</script>
+		</head>
+		<body>`;
+
+		html += `<h3>Possible explanation for "Why is this variable still borrowed?"</h3>`;
+		html += `<ol>`;
+
+		let cur_region: number = this.getFirstNode();
+		util.log(`cur_region: ${cur_region}`);
+
+		let curRegionLocalInfo = this.getLocalInfoForRegion(cur_region);
+		let local_line_nr = curRegionLocalInfo.local_line_nr;
+		let local_name = curRegionLocalInfo.local_name;
+		let constraint_line_nr = this.errorPath.lines_for_edges_start[cur_region][0];
+		let point_snip = this.errorPath.lines_for_edges_start[cur_region][1].trim();
+		html += `<li><a onclick="requestLineHighlight(${local_line_nr})">"${local_name}"</a>
+		may borrow the affected variable, due to line
+		<a onclick="requestLineHighlight(${constraint_line_nr})">${constraint_line_nr}: '${point_snip}'</a></li>`;
+
+		let next_region = this.getNextNode(cur_region);
+
+		while(next_region >= 0) {
+			let curRegionLocalInfo = this.getLocalInfoForRegion(cur_region);
+			let curLocalLineNr = curRegionLocalInfo.local_line_nr;
+			let curLocalName = curRegionLocalInfo.local_name;
+			let constraint_line_nr = this.errorPath.lines_for_edges_start[cur_region][0];
+			let point_snip = this.errorPath.lines_for_edges_start[cur_region][1].trim();
+			let nextRegionLocalInfo = this.getLocalInfoForRegion(next_region);
+			let nextLocalLineNr = nextRegionLocalInfo.local_line_nr;
+			let nextLocalName = nextRegionLocalInfo.local_name;
+
+			html += `<li><a onclick="requestLineHighlight(${nextLocalLineNr})">"${nextLocalName}"</a> may borrow
+			<a onclick="requestLineHighlight(${curLocalLineNr})">"${curLocalName}"</a>, due to line
+			<a onclick="requestLineHighlight(${constraint_line_nr})">${constraint_line_nr}: '${point_snip}'</a></li>`;
+
+
+			cur_region = next_region;
+			next_region = this.getNextNode(cur_region);
+
+			util.log(`cur_region: ${cur_region}`);
+
+		}
+
+		let lastRegionLocalInfo = this.getLocalInfoForRegion(cur_region);
+		let lastLocalLineNr = lastRegionLocalInfo.local_line_nr;
+		let lastLocalName = lastRegionLocalInfo.local_name;
+
+		html += `<li><a onclick="requestLineHighlight(${lastLocalLineNr})">"${lastLocalName}"</a> is later used</li>`;
+
+		html += `</ol></body>`;
+		return html;
+	}
+
+	/**
+	 * Get information about the local that is associated with a region. (More exactly, the line number it is defined
+	 * on and it's name) First, it tries to get the information from errorPath.locals_info_for_regions. If it does not
+	 * find good information there (e.g. if the line number entry is smaller then 1), it will try to find information in
+	 * errorPath.lines_for_regions, whereof it will take the line number from the first entry (if there is any), and
+	 * then try to parse the source code line to get the name of the local.
+	 * @param region The region for which the local information shall be aquired.
+	 * @returns It will return an object that contains a field local_line_nr that gives the line number where the local
+	 * is defined (Indexed from 1, i.e. like counting lines in a text editor), and a field local_name that gives tha
+	 * name of the local, as a string. If it fails to get the line number, it will return a value of 0 or lower and an
+	 * empty string as local_name. (If only getting the number succeeds, the string will also be empty.)
+	 */
+	private getLocalInfoForRegion(region: number): {local_line_nr: number, local_name: string} {
+		let local_line_nr = this.errorPath.locals_info_for_regions[region][0];
+		let local_name = this.errorPath.locals_info_for_regions[region][1];
+
+		if (local_line_nr < 1) {
+			// No local was found for this region, try to get the information (line number and local name) for the
+			// lines_for_regions information.
+			if (this.errorPath.lines_for_regions[region] && this.errorPath.lines_for_regions[region].length > 0) {
+				// if there are lines for regions, simply take the first of them and use it's information.
+				local_line_nr = this.errorPath.lines_for_regions[region][0][0];
+				let local_line_str: string = this.errorPath.lines_for_regions[region][0][1];
+				let localNameRegEx = /let[\s]+[\w]+/;
+				let localMatches = local_line_str.match(localNameRegEx);
+				if (localMatches) {
+					// matching succeeded, use this as local name (otherwise, it will remain to be an empty string.)
+					local_name = localMatches[0].split(/\s+/)[1];
+				}
+			}
+		}
+
+		return {local_line_nr, local_name};
 	}
 }
 

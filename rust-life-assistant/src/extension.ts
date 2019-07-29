@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('extension.rustLifeVisualizeGraph', async () => {
+	let disposableVisualizeGraph = vscode.commands.registerCommand('extension.rustLifeVisualizeGraph', async () => {
 		// The code you place here will be executed every time your command is executed
 
 		// Display a message box to the user
@@ -83,8 +83,32 @@ export function activate(context: vscode.ExtensionContext) {
 			util.log("vscode.window.activeTextEditor is not ready yet.");
 		}
 	});
+	context.subscriptions.push(disposableVisualizeGraph);
 
-	context.subscriptions.push(disposable);
+	let disposableVisualizeTextual = vscode.commands.registerCommand('extension.rustLifeVisualizeTextual', async () => {
+		if (vscode.window.activeTextEditor) {
+			// get the name of the currently opened file and run rust life on it, getting back the error path (graph):
+			let editor = vscode.window.activeTextEditor;
+			let errorPath = await runRustLife(
+				editor.document
+			);
+			if (errorPath == null) {
+				vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
+				Is the your target rust file opened in the active tab?');
+				// give up, return from the command callback:
+				return;
+			}
+			util.log(errorPath);
+
+			vscode.window.showInformationMessage(`Currently handled function: ${errorPath.function_name}`);
+
+			const graphVisualization = new errorVisualization.TextualVisualization(context, errorPath, editor);
+			const visualizationPanel = graphVisualization.showPathInPanel(errorPath, editor);
+		} else {
+			util.log("vscode.window.activeTextEditor is not ready yet.");
+		}
+	});
+	context.subscriptions.push(disposableVisualizeTextual);
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
