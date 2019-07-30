@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { performance } from 'perf_hooks';
 import * as util from './util';
+import * as config from './config';
 
 /**
  * @class A class that gives some basic structure and functionality for visualizing an error. (given as graph that is a
@@ -20,26 +24,43 @@ export abstract class Visualization {
 	 * @param editor The text editor ("window") that the source for this error is displayed in, is needed for
 	 * highlighting lines.
 	 */
-	constructor(context: vscode.ExtensionContext, errorPath: any, editor: vscode.TextEditor) {
+	constructor(context: vscode.ExtensionContext, editor: vscode.TextEditor) {
 		this.context = context;
-		this.errorPath = errorPath;
 		this.editor = editor;
 	}
 
 	/**
 	 * Does create the actual visualization (e.g. by calling generateHtml) and then create and set up a complete WebView
 	 * that will show the visualization in the second column of the VScode window.
+	 * Before, it will also run the rust-life (extract-error) executable that must be located in ~/.rust-life, to
+	 * analyse the document from the editor and get the information for the visualization.
 	 * @returns The created webView, for eventual further usage and treatment. (Not necessarily needed, all clean-up
 	 * that is needed from the view of this method is already set up appropriately before it returns.)
+	 * If something went wrong (e.g. the editor does not contain a rust file, or rust-life crashed unexpectedly), this
+	 * function will return `undefined`.
 	 */
-	public showPathInPanel(errorPath: any, editor: vscode.TextEditor) {
+	public async showPathInPanel() {
+		// run rust-life (compiler mod, executable named extract-error) and set it's result (read in from the JSON, i.e.
+		// the dumped form of EnrichedErrorGraph) to the global field for the errorPath (was not necessarily initialized
+		// before)
+		this.errorPath = await this.runRustLife(
+			this.editor.document
+		);
+		if (! this.errorPath) {
+			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
+			Is the your target rust file opened in the active tab?');
+			// give up, return from the command callback:
+			return;
+		}
+		util.log(this.errorPath);
+
 		// TODO check if there already is a panel for this editor (or better for this file?), only create a new one if
 		// there isn't, otherwise reuse the old one that should be accessible in some way...
 
 		// Create and show panel
 		const panel = vscode.window.createWebviewPanel(
 			'errorGraphView',
-			`Error Visualization for fn ${errorPath.function_name}`,
+			`Error explanation for fn ${this.errorPath.function_name}`,
 			vscode.ViewColumn.Two,
 			{
 				enableScripts: true,
@@ -48,13 +69,12 @@ export abstract class Visualization {
 
 		panel.webview.html = this.generateHtml();
 
-		let onClickHandler = new OnClickHandler(editor);
+		let onClickHandler = new OnClickHandler(this.editor);
 		panel.webview.onDidReceiveMessage(onClickHandler.handleWebViewMsg, onClickHandler, this.context.subscriptions);
 
 		let textEditorChangeDisposable = vscode.window.onDidChangeActiveTextEditor(onClickHandler.checkRestoreHighlight,
 			onClickHandler);
 
-		let documentUri = editor.document.uri;
 		panel.onDidDispose(undefined => {
 			textEditorChangeDisposable.dispose();
 			// guess there is no need to dispose the listener onDidReceiveMessage, since is is part of the panel that is
@@ -110,6 +130,48 @@ export abstract class Visualization {
 	 * set to.
 	 */
 	protected abstract generateHtml(): string;
+
+	/**
+	 * Function that runs the rust-life tool on a given document.
+	 * Once the tool terminated, the output of it (JSON) will be opened from the file and returned for further usage,
+	 * after being parsed to a object. (If nothing went terribly wrong in between it should correspond to the
+	 * serialized version of the EnrichedErrorGraph struct from the used rust-life version.)
+	 */
+	private async runRustLife(document: vscode.TextDocument) {
+		if (document.languageId === "rust") {
+			vscode.window.setStatusBarMessage("Running rust-life (compiler mod)...");
+			const start = performance.now();
+			const programPath = document.uri.fsPath;
+
+			// run the tool on the document:
+			const output = await util.spawn(
+				//"LD_LIBRARY_PATH=" + config.rustLibPath() + " " + config.rustLifeExe(context),
+				config.rustLifeExe(this.context),
+				["--sysroot", config.rustCompilerPath(), programPath],
+				{
+					cwd: config.rustLifeHome(this.context),
+					env: {
+						RUST_BACKTRACE: "1",
+						PATH: process.env.PATH,  // Needed e.g. to run Rustup (probably not really needed right now, but does not harm.)
+						LD_LIBRARY_PATH: config.rustLibPath()
+					}
+				}
+			);
+
+			const duration = Math.round((performance.now() - start) / 100) / 10;
+			vscode.window.setStatusBarMessage(`rust-life (compiler mod) terminated (${duration} s)`);
+
+			let jsonDumpPath = path.join(config.rustLifeHome(this.context), "nll-facts", "error_graph.json");
+			let rawData = fs.readFileSync(jsonDumpPath, 'utf8');
+			let result = JSON.parse(rawData);
+			return result;
+		} else {
+			util.log(
+				"The document is not a Rust program, thus rust-life (compiler mod) will not run on it."
+			);
+		}
+	}
+
 }
 
 /**
@@ -334,7 +396,7 @@ export class TextualVisualization extends Visualization {
 	 * find good information there (e.g. if the line number entry is smaller then 1), it will try to find information in
 	 * errorPath.lines_for_regions, whereof it will take the line number from the first entry (if there is any), and
 	 * then try to parse the source code line to get the name of the local.
-	 * @param region The region for which the local information shall be aquired.
+	 * @param region The region for which the local information shall be acquired.
 	 * @returns It will return an object that contains a field local_line_nr that gives the line number where the local
 	 * is defined (Indexed from 1, i.e. like counting lines in a text editor), and a field local_name that gives tha
 	 * name of the local, as a string. If it fails to get the line number, it will return a value of 0 or lower and an
@@ -351,11 +413,23 @@ export class TextualVisualization extends Visualization {
 				// if there are lines for regions, simply take the first of them and use it's information.
 				local_line_nr = this.errorPath.lines_for_regions[region][0][0];
 				let local_line_str: string = this.errorPath.lines_for_regions[region][0][1];
-				let localNameRegEx = /let[\s]+[\w]+/;
-				let localMatches = local_line_str.match(localNameRegEx);
-				if (localMatches) {
-					// matching succeeded, use this as local name (otherwise, it will remain to be an empty string.)
-					local_name = localMatches[0].split(/\s+/)[1];
+				let letNameRegEx = /let[\s]+[\w]+/;
+				let letLocalMatches = local_line_str.match(letNameRegEx);
+				if (letLocalMatches) {
+					// matching succeeded, get the local name (otherwise, it will remain to be an empty string.)
+					let letLocalMatchesSplits = letLocalMatches[0].split(/\s+/);
+					if(! letLocalMatchesSplits[1].includes("mut")) {
+						// the matched second element is the name, set it
+						local_name = letLocalMatchesSplits[1];
+					} else {
+						// the matched element is the `mut` keyword, retry to match as a `let mut {localName}` statement.
+						let letMutNameRegEx = /let[\s]+mut[\s]+[\w]+/;
+						let letMutLocalMatches = local_line_str.match(letMutNameRegEx);
+						if (letMutLocalMatches) {
+							// matched as `let mut {localName}` statement, the element tow will be the local name
+							local_name = letMutLocalMatches[0].split(/\s+/)[2];
+						}
+					}
 				}
 			}
 		}
