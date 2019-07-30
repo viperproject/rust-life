@@ -13,8 +13,9 @@ import * as config from './config';
  */
 export abstract class Visualization {
 	context: vscode.ExtensionContext;
-	errorPath: any;
 	editor: vscode.TextEditor;
+	errorPath: any;
+	rustLifeOutput: util.Output | undefined;
 
 	/**
 	 * Create a new instance of a Visualization.
@@ -43,15 +44,17 @@ export abstract class Visualization {
 		// run rust-life (compiler mod, executable named extract-error) and set it's result (read in from the JSON, i.e.
 		// the dumped form of EnrichedErrorGraph) to the global field for the errorPath (was not necessarily initialized
 		// before)
-		this.errorPath = await this.runRustLife(
+		let rustLifeRes = await this.runRustLife(
 			this.editor.document
 		);
-		if (! this.errorPath) {
+		if (! rustLifeRes) {
 			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
 			Is the your target rust file opened in the active tab?');
 			// give up, return from the command callback:
 			return;
 		}
+		this.errorPath = rustLifeRes.errorPath;
+		this.rustLifeOutput = rustLifeRes.output;
 		util.log(this.errorPath);
 
 		// TODO check if there already is a panel for this editor (or better for this file?), only create a new one if
@@ -125,7 +128,10 @@ export abstract class Visualization {
 	 * This function generates the HTML of the visualization. It will be called by showPathInPanel(...) and must be
 	 * overridden by any concrete class that inherits from `Visualization`.
 	 * For creating the HTML, this function shall use the `errorPath` (an EnrichedErrorPath, read from a JSON dump of
-	 * Rust Life) to get the information that it shall visualize.
+	 * Rust Life) to get the information that it shall visualize. Furthermore it may also use `rustLifeOutput`.
+	 * Hence it is guaranteed (and must be guaranteed by any callee) that both `errorPath` and `rustLifeOutput` are
+	 * initialized as expected. (`errorPath` to a EnrichedErrorGraph (serialization), e.g. read from JSON, and
+	 * `rustLifeOutput` to an instance of util.Output. Both shall definitely not be undefined.)
 	 * @returns The generates HTML as string. This shall be valid HTML that a vscode.WebViewPanel.webview.html can be
 	 * set to.
 	 */
@@ -136,8 +142,11 @@ export abstract class Visualization {
 	 * Once the tool terminated, the output of it (JSON) will be opened from the file and returned for further usage,
 	 * after being parsed to a object. (If nothing went terribly wrong in between it should correspond to the
 	 * serialized version of the EnrichedErrorGraph struct from the used rust-life version.)
+	 * @returns The EnrichedErrorGraph from the JSON and the output (giving stdout, stderr and the return code) of the
+	 * Rust Life (extract-error) executable, if the execution succeeded. Otherwise, undefined is returned.
 	 */
-	private async runRustLife(document: vscode.TextDocument) {
+	private async runRustLife(document: vscode.TextDocument):
+					Promise<{errorPath: any, output: util.Output} | undefined> {
 		if (document.languageId === "rust") {
 			vscode.window.setStatusBarMessage("Running rust-life (compiler mod)...");
 			const start = performance.now();
@@ -161,14 +170,20 @@ export abstract class Visualization {
 			const duration = Math.round((performance.now() - start) / 100) / 10;
 			vscode.window.setStatusBarMessage(`rust-life (compiler mod) terminated (${duration} s)`);
 
+			if (! output) {
+				// Something with running Rust Life when (rather) wrong, we did not get an usable result.
+				return undefined;
+			}
+
 			let jsonDumpPath = path.join(config.rustLifeHome(this.context), "nll-facts", "error_graph.json");
 			let rawData = fs.readFileSync(jsonDumpPath, 'utf8');
-			let result = JSON.parse(rawData);
-			return result;
+			let errorPath = JSON.parse(rawData);
+			return {errorPath, output};
 		} else {
 			util.log(
 				"The document is not a Rust program, thus rust-life (compiler mod) will not run on it."
 			);
+			return undefined;
 		}
 	}
 
@@ -308,11 +323,19 @@ export class TextualVisualization extends Visualization {
 	/**
 	 * Render a EnrichedErrorGraph (e.g. read from JSON) as a complete HTML page (webview content)
 	 * It will use the field Visualization.errorPath field as EnrichedErrorGraph (version only containing fields that
-	 * are included in JSON dump suffices) to get the information it needs for creating the HTML.
+	 * are included in JSON dump suffices) to get the information it needs for creating the HTML. Furthermore, it will
+	 * also use the rustLifeOutput. Hence it must be ensured that both of these fields are appropriately initialized
+	 * (i.e. not undefined) before this method is called.
+	 * @requires this.errorPath
+	 * @requires this.rustLifeOutput
 	 * @returns The generated HTML, as string. This will be valid HTML that a vscode.WebViewPanel.webview.html can be
 	 * set to.
+	 * However, if any precondition is violated, this method will return an empty string.
 	 */
 	protected generateHtml(): string {
+		if ((! this.rustLifeOutput) || (! this.errorPath)) {
+			return "";
+		}
 		let html = `<!DOCTYPE html>
 		<html lang="en">
 		<head>
@@ -340,6 +363,11 @@ export class TextualVisualization extends Visualization {
 			</script>
 		</head>
 		<body>`;
+
+		html += `<h3>Rust compiler error (basically stderr of rustc):</h3>`;
+
+		let rustLifeStderr = this.rustLifeOutput.stderr.replace(/\n/g, "<br>");
+		html += `<p>${rustLifeStderr}</p>`;
 
 		html += `<h3>Possible explanation for "Why is this variable still borrowed?"</h3>`;
 		html += `<ol>`;
