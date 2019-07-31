@@ -139,6 +139,8 @@ export abstract class Visualization {
 
 	/**
 	 * Function that runs the rust-life tool on a given document.
+	 * It will instruct the underlying rustc (part of Rust Life) to not issue any warning messages, so these will
+	 * not be part of the stderr output.
 	 * Once the tool terminated, the output of it (JSON) will be opened from the file and returned for further usage,
 	 * after being parsed to a object. (If nothing went terribly wrong in between it should correspond to the
 	 * serialized version of the EnrichedErrorGraph struct from the used rust-life version.)
@@ -156,7 +158,7 @@ export abstract class Visualization {
 			const output = await util.spawn(
 				//"LD_LIBRARY_PATH=" + config.rustLibPath() + " " + config.rustLifeExe(context),
 				config.rustLifeExe(this.context),
-				["--sysroot", config.rustCompilerPath(), programPath],
+				["--sysroot", config.rustCompilerPath(), "-A", "warnings", programPath],
 				{
 					cwd: config.rustLifeHome(this.context),
 					env: {
@@ -366,11 +368,9 @@ export class TextualVisualization extends Visualization {
 
 		html += `<h3>Rust compiler error (basically stderr of rustc):</h3>`;
 
-		let rustLifeStderr = this.rustLifeOutput.stderr.replace(/\n/g, "<br>");
-		html += `<p>${rustLifeStderr}</p>`;
+		html += `<pre>${this.rustLifeOutput.stderr}</pre>`;
 
-		html += `<h3>Possible explanation for "Why is this variable still borrowed?"</h3>`;
-		html += `<ol>`;
+		let explanationListHtml = `<ol>`;
 
 		let cur_region: number = this.getFirstNode();
 		util.log(`cur_region: ${cur_region}`);
@@ -380,8 +380,8 @@ export class TextualVisualization extends Visualization {
 		let local_name = curRegionLocalInfo.local_name;
 		let constraint_line_nr = this.errorPath.lines_for_edges_start[cur_region][0];
 		let point_snip = this.errorPath.lines_for_edges_start[cur_region][1].trim();
-		html += `<li><a onclick="requestLineHighlight(${local_line_nr})">"${local_name}"</a>
-		may borrow the affected variable, due to line
+		explanationListHtml += `<li><a onclick="requestLineHighlight(${local_line_nr})">"${local_name}"</a>
+		borrows the initial variable, due to line
 		<a onclick="requestLineHighlight(${constraint_line_nr})">${constraint_line_nr}: '${point_snip}'</a></li>`;
 
 		let next_region = this.getNextNode(cur_region);
@@ -390,16 +390,19 @@ export class TextualVisualization extends Visualization {
 			let curRegionLocalInfo = this.getLocalInfoForRegion(cur_region);
 			let curLocalLineNr = curRegionLocalInfo.local_line_nr;
 			let curLocalName = curRegionLocalInfo.local_name;
-			let constraint_line_nr = this.errorPath.lines_for_edges_start[cur_region][0];
-			let point_snip = this.errorPath.lines_for_edges_start[cur_region][1].trim();
 			let nextRegionLocalInfo = this.getLocalInfoForRegion(next_region);
 			let nextLocalLineNr = nextRegionLocalInfo.local_line_nr;
 			let nextLocalName = nextRegionLocalInfo.local_name;
 
-			html += `<li><a onclick="requestLineHighlight(${nextLocalLineNr})">"${nextLocalName}"</a> may borrow
-			<a onclick="requestLineHighlight(${curLocalLineNr})">"${curLocalName}"</a>, due to line
-			<a onclick="requestLineHighlight(${constraint_line_nr})">${constraint_line_nr}: '${point_snip}'</a></li>`;
+			// ignore points that state things like `x borrows x`, only print these that are sensible.
+			if (curLocalName !== nextLocalName) {
+				let constraint_line_nr = this.errorPath.lines_for_edges_start[cur_region][0];
+				let point_snip = this.errorPath.lines_for_edges_start[cur_region][1].trim();
 
+				explanationListHtml += `<li><a onclick="requestLineHighlight(${nextLocalLineNr})">"${nextLocalName}"</a>
+				borrows <a onclick="requestLineHighlight(${curLocalLineNr})">"${curLocalName}"</a>, due to line
+				<a onclick="requestLineHighlight(${constraint_line_nr})">${constraint_line_nr}: '${point_snip}'</a></li>`;
+			}
 
 			cur_region = next_region;
 			next_region = this.getNextNode(cur_region);
@@ -412,9 +415,15 @@ export class TextualVisualization extends Visualization {
 		let lastLocalLineNr = lastRegionLocalInfo.local_line_nr;
 		let lastLocalName = lastRegionLocalInfo.local_name;
 
-		html += `<li><a onclick="requestLineHighlight(${lastLocalLineNr})">"${lastLocalName}"</a> is later used</li>`;
+		explanationListHtml += `<li><a onclick="requestLineHighlight(${lastLocalLineNr})">"${lastLocalName}"</a>
+		is later used</li>`;
 
-		html += `</ol></body>`;
+		explanationListHtml += `</ol>`;
+		html += `<h3>Possible explanation for "Why is ${lastLocalName} still borrowing the initial variable?"</h3>`;
+		html += explanationListHtml;
+
+
+		html +=`</body>`;
 		return html;
 	}
 
@@ -446,7 +455,7 @@ export class TextualVisualization extends Visualization {
 				if (letLocalMatches) {
 					// matching succeeded, get the local name (otherwise, it will remain to be an empty string.)
 					let letLocalMatchesSplits = letLocalMatches[0].split(/\s+/);
-					if(! letLocalMatchesSplits[1].includes("mut")) {
+					if(letLocalMatchesSplits[1] !== "mut") {
 						// the matched second element is the name, set it
 						local_name = letLocalMatchesSplits[1];
 					} else {
