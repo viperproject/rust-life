@@ -178,7 +178,16 @@ export abstract class Visualization {
 			}
 
 			let jsonDumpPath = path.join(config.rustLifeHome(this.context), "nll-facts", "error_graph.json");
-			let rawData = fs.readFileSync(jsonDumpPath, 'utf8');
+			let rawData;
+			try {
+				rawData = fs.readFileSync(jsonDumpPath, 'utf8');
+			} catch(ex) {
+				// Reading the file failed, something must have gone wrong, report to log and return `undefined` for
+				// further handling.
+				util.log("There was an error while trying to read the JSON file that should have been created by Rust Life on success.");
+				return undefined;
+			}
+
 			let errorPath = JSON.parse(rawData);
 			return {errorPath, output};
 		} else {
