@@ -459,23 +459,17 @@ export class TextualVisualization extends Visualization {
 				// if there are lines for regions, simply take the first of them and use it's information.
 				local_line_nr = this.errorPath.lines_for_regions[region][0][0];
 				let local_line_str: string = this.errorPath.lines_for_regions[region][0][1];
-				let letNameRegEx = /let[\s]+[\w]+/;
+				let letNameRegEx = /let[\s]+((mut[\s]+)|(ref[\s]+))*[\w]+/;
 				let letLocalMatches = local_line_str.match(letNameRegEx);
 				if (letLocalMatches) {
 					// matching succeeded, get the local name (otherwise, it will remain to be an empty string.)
 					let letLocalMatchesSplits = letLocalMatches[0].split(/\s+/);
-					if(letLocalMatchesSplits[1] !== "mut") {
-						// the matched second element is the name, set it
-						local_name = letLocalMatchesSplits[1];
-					} else {
-						// the matched element is the `mut` keyword, retry to match as a `let mut {localName}` statement.
-						let letMutNameRegEx = /let[\s]+mut[\s]+[\w]+/;
-						let letMutLocalMatches = local_line_str.match(letMutNameRegEx);
-						if (letMutLocalMatches) {
-							// matched as `let mut {localName}` statement, the element tow will be the local name
-							local_name = letMutLocalMatches[0].split(/\s+/)[2];
+					letLocalMatchesSplits.splice(1).forEach(match => {
+						if (match !== "mut" && match !== "ref") {
+							// the element is the name, set it (as it is neither `let` nor `mut` nor `ref`)
+							local_name = match;
 						}
-					}
+					});
 				}
 			}
 		}
