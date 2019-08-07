@@ -1,0 +1,7 @@
+[package]
+name = "collected_code"
+version = "0.1.0"
+authors = ["David Blaser <blaserd@student.ethz.ch>"]
+edition = "2018"
+
+[dependencies]

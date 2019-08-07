@@ -40,3 +40,5 @@ Thumbs.db
 /compiler_mod/nll-facts
 /compiler_mod/.idea
 /compiler_mod/log
+
+/collected_code/target/
