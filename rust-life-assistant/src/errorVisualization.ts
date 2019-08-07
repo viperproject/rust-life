@@ -459,13 +459,13 @@ export class TextualVisualization extends Visualization {
 				// if there are lines for regions, simply take the first of them and use it's information.
 				local_line_nr = this.errorPath.lines_for_regions[region][0][0];
 				let local_line_str: string = this.errorPath.lines_for_regions[region][0][1];
-				let letNameRegEx = /let[\s]+((mut[\s]+)|(ref[\s]+))*[\w]+/;
+				let letNameRegEx = /((let[\s]+)|(mut[\s]+)|(ref[\s]+))*[\w]+/;
 				let letLocalMatches = local_line_str.match(letNameRegEx);
 				if (letLocalMatches) {
 					// matching succeeded, get the local name (otherwise, it will remain to be an empty string.)
 					let letLocalMatchesSplits = letLocalMatches[0].split(/\s+/);
-					letLocalMatchesSplits.splice(1).forEach(match => {
-						if (match !== "mut" && match !== "ref") {
+					letLocalMatchesSplits.forEach(match => {
+						if (match !== "let" && match !== "mut" && match !== "ref") {
 							// the element is the name, set it (as it is neither `let` nor `mut` nor `ref`)
 							local_name = match;
 						}
