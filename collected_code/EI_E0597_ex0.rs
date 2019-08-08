@@ -6,5 +6,16 @@
 //
 // This example is specific for error E0597. (example 0)
 
-// NOTE: This file does not contain any code, as I think that this error seems to be specific to Rust edition 2015.
-// At least I did not succeed when I tried to port the example to Rust edition 2018
+#![allow(unused)]
+fn main() {
+    struct Foo<'a> {
+        x: Option<&'a u32>,
+    }
+
+    let mut x = Foo { x: None };
+    {
+        let y = 0;
+        x.x = Some(&y); // error: `y` does not live long enough
+    }
+    println!("{:?}", x.x);
+}

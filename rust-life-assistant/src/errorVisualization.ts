@@ -150,7 +150,7 @@ export abstract class Visualization {
 	private async runRustLife(document: vscode.TextDocument):
 					Promise<{errorPath: any, output: util.Output} | undefined> {
 		if (document.languageId === "rust") {
-			vscode.window.setStatusBarMessage("Running rust-life (compiler mod)...");
+			vscode.window.setStatusBarMessage("Running Rust Life...");
 			const start = performance.now();
 			const programPath = document.uri.fsPath;
 
@@ -170,7 +170,7 @@ export abstract class Visualization {
 			);
 
 			const duration = Math.round((performance.now() - start) / 100) / 10;
-			vscode.window.setStatusBarMessage(`rust-life (compiler mod) terminated (${duration} s)`);
+			vscode.window.setStatusBarMessage(`Rust Life terminated (${duration} s)`);
 
 			if (! output) {
 				// Something with running Rust Life when (rather) wrong, we did not get an usable result.
