@@ -49,7 +49,7 @@ export abstract class Visualization {
 		);
 		if (! rustLifeRes) {
 			vscode.window.showErrorMessage('Rust Life did not run successfully, no output available.\
-			Is the your target rust file opened in the active tab?');
+			Is your target rust file opened in the active tab?');
 			// give up, return from the command callback:
 			return;
 		}
