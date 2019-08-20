@@ -20,9 +20,8 @@ fn main() {
     let mut a = 32;
     let b = 42;
 
-    let r = w;
     let s = &w;
-    let t = foo(&s);
+    let r = foo(&s);
 
     x = 5;
     *f = 42;
