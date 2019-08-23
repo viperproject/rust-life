@@ -1,13 +1,13 @@
 # Rust Life Assistant
 
-This is an IDE extensions that does provides simple visualizations for complex lifetime errors. For doing so it does use Rust Life.
+This is an IDE extensions that does provides simple explanations for complex lifetime errors. For doing so it does use Rust Life.
 
 ## Features
 This extension can both show the graph-based (more precisely, path-based) visualization of an error that is created by Rust Life, as well as create a simple step-by-step guide in text form.
 
-Both outputs are interactive, this means that parts of them (either the nodes of the graph or the blue parts of the text) can be clicked to request a highlighting of a line of source code.
+Both outputs are interactive, this means that parts of them (either the nodes of the graph or the blue parts of the text) can be clicked to request a highlighting of a related line of source code.
 
-The graph-based visualization is requested by the command `Rust Life: Visualize as Graph`, and the text based by `Rust Life: Explain with Text` (Hit `Ctrl+Shift+P` to open the command plate.) Please note that Rust Life might need some time to complete its execution, please be patient.
+The graph-based visualization is requested by the command `Rust Life: Visualize as Graph`, and the text based by `Rust Life: Explain with Text` (Hit `Ctrl+Shift+P` to open the command plate.) Note that Rust Life might need some time to complete its execution, please be patient.
 
 <!-- TODO: provide a better description -->
 <!-- Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
@@ -20,23 +20,24 @@ For example if there is an image subfolder under your extension project workspac
 
 ## Requirements
 
-This extension will only work on a system that is set up appropriately, since it has rather strict requirements. (It is not that flexible, esp. since some paths are hardcoded for now.)
+This extension will only work on a system that is set up appropriately, since it has rather strict requirements. (It is not that flexible, esp. since some paths to files are hardcoded for now.)
 
 Since no pre-built versions are available, one needs a working development environment for VS code extensions. This is best achieved by following the instructions in [Your First Extension](https://code.visualstudio.com/api/get-started/your-first-extension).
 
-In addition, Rust must be installed, since a specific nightly version is required we strongly recommend using rustup. (Pleas stick to default settings regarding paths for storing the files of rustup.)
+In addition, Rust must be installed. Since a specific nightly version is required we strongly recommend using rustup. (Pleas stick to default settings regarding paths for storing the files of rustup.)
 
 Then, follow these steps to make everything ready for using Rust Life Assistant:
-- First you need to get a copy of the Rust Life executable. Currently, Rust Life Version 0.3.0 is required. Build it with by the following steps:
+- First you need to get a copy of the Rust Life executable. Currently, Rust Life Version 0.3.0 is required. Build it by following this steps:
     - cd to the `compiler_mod` directory.
     - run the command `make build` to start the build process. This might take some time.
-    - Note that by doing so rustup will also install the `nightly-2019-05-21` toolchain, which is must be installed to use Rust Life (Assistant).
+    - Note that by doing so rustup will also install the `nightly-2019-05-21` toolchain, which must be installed to use Rust Life (Assistant).
       This will need approximately 1 GB of disk space.
 - The generated executable is located in `compiler_mod/target/debug` and called `extract-error`
 - Copy this executable into a folder named `.rust-life` in your home directory. (More precisely, in the home directory of the user that shall use Rust Life).
   Do not alter the name of the executable.
 - Now open the extension folder with the extension (`rust-life-assistant`) in VS code and hit F5 to build the extension and run it.
 - The extension development host (essentially another VS code instance) will start, and Rust Life Assistant is available for being used in it.
+- Open the Rust file that you want to analyse in it and run one of the commands that were described in the Section [Features](#Features).
 
 Note: Due to the hardcoded file system paths this extension can only be used on GNU/Linux systems. It was only tested on an Ubunut-based platform, but will most likely also work on any other distributions that can run VS code and rustup. (However, it will most likely not work on Windows or macOS)
 
@@ -57,10 +58,10 @@ This extension contributes the following settings:
   previous execution. This is a simple implementation insufficiency that
   could be resolved by a simple clean-up step.
 - In some cases the parsing of source lines to get local variable's names will fail and include something that is not the name of a local variable.
-- Right now, there is not an official option to deactivate source code highlighting. Once it was triggered, one line will always stay highlighted. It can be deactivated by first closing the visualization that created it, then switching to a different tab (rendering the affected one invisible) and then switching back to it.
+- Right now, there is not an official option to deactivate source code highlighting. Once it was triggered, one line will always stay highlighted. It can be deactivated by first closing the visualization that created it, then switching to a different tab (rendering the affected one invisible) and then switching back.
 - Rust Life contains hardcoded paths to files, that probably prevent it from ruing on different platforms then GNU/Linux. Mitigating this would probably be doable, but might take some time.
 - Some of the security guidelines for extensions, esp. for WebViews are currently violated. This should be fixed before using this extension in production, esp. if it will eventually include using online content in the future.
-- There probably are quite some more issues in the code.
+- There probably are quite some more issues that we did not note yet or we forgot to include here.
 
 Note: This list only provides issues specific to the implementation of Rust Life Assistant, some issues that mostly affect Rust Life are given in the thesis.
 

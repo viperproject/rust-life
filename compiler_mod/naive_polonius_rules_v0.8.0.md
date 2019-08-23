@@ -1,14 +1,14 @@
-# Naive polonius borrowchecker rules, v0.8.0
-There follows a list of all rules that are used by the polonius borrow checker (naive version), that were found in the file [polonius/polonius-engine/src/output/naive.rs](https://github.com/rust-lang/polonius/blob/master/polonius-engine/src/output/naive.rs). The rules are given as Datalog rules (using the Soufflé project syntax), basically they are just copies of the comments in the source file. In addition, we also try to give short explanations of all rules, these explanations are mostly based on the information in the blog post ["An alias-based formulation of the borrow checker"](http://smallcultfollowing.com/babysteps/blog/2018/04/27/an-alias-based-formulation-of-the-borrow-checker/) by Nicholas Matsakis, i.e. basically the first introduction of the polonius borrow checker.
+# Naive Polonius borrowchecker rules, v0.8.0
+There follows a list of all rules that are used by the Polonius borrow checker (naive version), that were found in the file [polonius/polonius-engine/src/output/naive.rs](https://github.com/rust-lang/polonius/blob/master/polonius-engine/src/output/naive.rs). The rules are given as Datalog rules (using the Soufflé project syntax), basically they are just copies of the comments in the source file. In addition, we also try to give short explanations of all rules, these explanations are mostly based on the information in the blog post ["An alias-based formulation of the borrow checker"](http://smallcultfollowing.com/babysteps/blog/2018/04/27/an-alias-based-formulation-of-the-borrow-checker/) by Nicholas Matsakis, i.e. basically the first introduction of the Polonius borrow checker.
 
-This document gives the rules from version 0.4.0 of polonius, i.e. the ones from polonius-engine version 0.8.0.
+This document gives the rules from version 0.4.0 of Polonius, i.e. the ones from Polonius-engine version 0.8.0.
 
 Note that the construct that previously was called "loan", and often denoted as 'L' seems to now be called "borrow", and is now denoted as 'B'.
 
 ## Rules
 First, these are the rules that are used by Polonius, where the last rule is defining an actual (eventual) error.
 
-The part of the Subset relation that is given as an input fact that is called outlives. This is not computed by the polonius borrow checker, but given as static input.
+The part of the Subset relation that is given as an input fact that is called outlives. This is not computed by the Polonius borrow checker, but given as static input.
 ```Datalog
 subset(R1, R2, P) :-
   outlives(R1, R2, P).
@@ -91,7 +91,7 @@ This fact is simply the control-flow graph (cfg) of the relevant program part, g
 
 This basically gives the information that a certain region is live at a certain point. (The details of this, and the definitions are given in the blog post, that also redirects to the NLL RFC.)
 However, note that in the current version of Polonius it does not directly use the `region_live_at` that is provided as input (as part of all_facts), but instad it uses a new one that is explicitly computed right at the beginning by Polonius by calling the method `liveness::init_region_live_at(...)`. (So the relation that is used by Polonius will differ from the one that is available as part of the inputs) Still, for the rules provided before, this (new) `region_live_at` is considered to be an input fact.
-Also, it seems (from the commit history) that this change was only introduced in polonius-engine 0.8.0. Before, the `region_live_at` relation form the inputs was used directly.
+Also, it seems (from the commit history) that this change was only introduced in Polonius-engine 0.8.0. Before, the `region_live_at` relation form the inputs was used directly.
 ```Datalog
 .decl region_live_at(R:Region, P:Point)
 .input region_live_at
