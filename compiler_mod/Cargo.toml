@@ -1,7 +1,10 @@
 [package]
-name = "extract-error"
+name = "rust-life"
 version = "0.3.1"
-authors = ["Dominik Dietler <ddietler@student.ethz.ch>"]
+authors = [
+    "Dominik Dietler <ddietler@student.ethz.ch>",
+    "David Blaser <blaserd@student.ethz.ch>"
+]
 
 [dependencies]
 log = "0.4" # did change "automatically" anyway, should we change it here?
