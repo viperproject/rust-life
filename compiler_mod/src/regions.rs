@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
-use std::thread::LocalKey;
 
 /// This function is deprecated, and actually also bugous. Also, the returned result, and actually
 /// even it's type (map from local to region), is nonsense.
@@ -83,7 +82,7 @@ pub fn load_region_to_local_map(path: &Path) -> io::Result<HashMap<facts::Region
         let line = line?;
         if let Some(variable_definition_caps) = variable_definition.captures(&line) {
             let local: usize = (&variable_definition_caps["local"]).parse().unwrap();
-            let type_str = (&variable_definition_caps["type"]);
+            let type_str = &variable_definition_caps["type"];
             for cap_reg in region_name.captures_iter(type_str) {
                 let region: usize = (&cap_reg[1]).parse().unwrap();
                 result.insert(region.into(), mir::Local::new(local));

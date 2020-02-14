@@ -16,19 +16,16 @@ use super::regions;
 use std::{cell};
 use std::env;
 use std::collections::{HashMap,BTreeMap, BTreeSet};
-use std::fs::{File, remove_dir};
-use std::io::{self, Write, BufWriter};
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use self::polonius_engine::{Algorithm, Output};
 use rustc::hir::{self, intravisit};
 use rustc::mir;
-use rustc::ty;
 use rustc::ty::TyCtxt;
 use self::rustc_data_structures::fx::FxHashMap;
 use self::datafrog::Relation;
-use self::regex::Regex;
 use self::facts::{PointIndex, Loan, Region};
-use facts::Point;
 
 pub fn dump_borrowck_info<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     trace!("[dump_borrowck_info] enter");
@@ -457,17 +454,17 @@ impl <'epf> ErrorPathFinder<'epf> {
     fn compute_error_path(&mut self) -> Vec<Region> {
         trace!("[compute_error_path] enter");
 
-        let regions_life_at_error: Vec<Region> = self.all_facts.region_live_at.iter().filter(|&(r, p)|
+        let regions_life_at_error: Vec<Region> = self.all_facts.region_live_at.iter().filter(|&(_r, p)|
             *p == self.error_fact.0
-        ).map(|&(r, p)| r).collect();
+        ).map(|&(r, _p)| r).collect();
 
         debug!("regions_life_at_error: {:?}", regions_life_at_error);
 
         //NOTE It might be possible to simplify this, making the next step superfluous, as we already get a loan form the error in error_fact.
 
-        let loans_invalidated_by_error: Vec<Loan> = self.all_facts.invalidates.iter().filter(|&(p, l)|
+        let loans_invalidated_by_error: Vec<Loan> = self.all_facts.invalidates.iter().filter(|&(p, _l)|
             *p == self.error_fact.0
-        ).map(|&(p, l)| l).collect();
+        ).map(|&(_p, l)| l).collect();
 
         debug!("loans_invalidated_by_error: {:?}", loans_invalidated_by_error);
 
@@ -635,7 +632,7 @@ impl <'epf> ErrorPathFinder<'epf> {
         let input_loans_of_cur_region =  self.loan_of_reagion(start);
         debug!("input_loans_of_cur_region: {:?}", input_loans_of_cur_region);
 
-        if self.all_facts.borrow_region.iter().filter(|&(r, l, p)|
+        if self.all_facts.borrow_region.iter().filter(|&(r, l, _)|
                     *r == start && *l == self.error_loan
                 ).count() > 0 {
             // the start region does include the error loan. (May also be called error borrow.)
@@ -1150,7 +1147,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     fn dump_outlive_error_graph_as_json(&self,
                                         error_graph: &EnrichedErrorGraph,
                                         graph_out_path: &PathBuf) {
-        let mut out_file = File::create(graph_out_path).expect("Unable to create file");
+        let out_file = File::create(graph_out_path).expect("Unable to create file");
         let res = serde_json::to_writer_pretty(out_file, error_graph);
         // TODO ev. remove pretty when done with debugging!
         debug!("Result from dumping: {:?}", res);
@@ -1349,7 +1346,7 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
                 local_name = ("anonymous Variable").to_string();
                 for block_data in self.mir.basic_blocks().iter() {
                     for stmt in block_data.statements.iter() {
-                        if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+                        if let mir::StatementKind::Assign(ref l, ref _r) = stmt.kind{
                             match l.local() {
                                 Some(v) => if v==*local_x1 {
                                     local_source = stmt.source_info.span;
