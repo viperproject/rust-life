@@ -105,12 +105,6 @@ impl<'a, 'tcx> intravisit::Visitor<'tcx> for InfoPrinter<'a, 'tcx> {
         // This was disabled before (isteand, an "older" version of mir was read from tcx before), but was re-enabled now to keep the old code work in a consistent way for now.
         let mir = self.tcx.mir_validated(def_id).borrow();
 
-        let graph_path = PathBuf::from("nll-facts")
-            .join(def_path.to_filename_friendly_no_crate())
-            .join("graph.dot");
-        let graph_file = File::create(graph_path).expect("Unable to create file");
-        let graph = BufWriter::new(graph_file);
-
         let interner = facts_loader.interner;
 
         let region_to_local_map = regions::load_region_to_local_map(&renumber_path).expect("Error reading mir dump file!");
@@ -835,20 +829,21 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
             debug!("region_to_local_map: {:?}", self.region_to_local_map);
 
-            let old_error_graph_path = PathBuf::from("nll-facts")
-                .join(self.def_path.to_filename_friendly_no_crate())
-                .join("old_error_graph.dot");
-
-            self.print_outlive_error_graph_legacy(&graph_to_explain_last_error, &old_error_graph_path);
-
-            let error_graph_path = PathBuf::from("nll-facts")
-                .join(self.def_path.to_filename_friendly_no_crate())
-                .join("error_graph.dot");
+//            let old_error_graph_path = PathBuf::from("nll-facts")
+//                .join(self.def_path.to_filename_friendly_no_crate())
+//                .join("old_error_graph.dot");
+//
+//            self.print_outlive_error_graph_legacy(&graph_to_explain_last_error, &old_error_graph_path);
 
             let mut enriched_graph_to_explain_last_error =
                 self.create_enriched_graph(&graph_to_explain_last_error, &self.borrowck_in_facts.borrow_region);
 
-            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path);
+            // These lines can be uncommented for debugging purposes
+//            let error_graph_path = PathBuf::from("nll-facts")
+//                .join(self.def_path.to_filename_friendly_no_crate())
+//                .join("error_graph.dot");
+//
+//            self.print_outlive_error_graph(&enriched_graph_to_explain_last_error, &error_graph_path);
 
             let error_graph_path_improved = PathBuf::from("nll-facts")
                 .join(self.def_path.to_filename_friendly_no_crate())
@@ -865,7 +860,6 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
             // future, e.g. by allowing control to the user regarding the method that shall be
             // handled.
             let error_graph_path_json = PathBuf::from("nll-facts")
-//                .join(self.def_path.to_filename_friendly_no_crate())
                 .join("error_graph.json");
 
             self.dump_outlive_error_graph_as_json(&enriched_graph_to_explain_last_error, &error_graph_path_json);
@@ -895,10 +889,10 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
 
         }
 
-        let expl_graph_path = PathBuf::from("nll-facts")
-            .join(self.def_path.to_filename_friendly_no_crate())
-            .join("outlive_graph.dot");
-        self.print_outlive_error_graph_legacy(&outlives_at, &expl_graph_path);
+//        let expl_graph_path = PathBuf::from("nll-facts")
+//            .join(self.def_path.to_filename_friendly_no_crate())
+//            .join("outlive_graph.dot");
+//        self.print_outlive_error_graph_legacy(&outlives_at, &expl_graph_path);
     }
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
@@ -919,159 +913,159 @@ impl<'a, 'tcx> MirInfoPrinter<'a, 'tcx> {
     /// method an will be removed soon. In addition, it will also print reflexive relations in a
     /// special way that was intended to emphasize that regions connected by reflexive edges are
     /// considered as being equal.
-    fn print_outlive_error_graph_legacy(&self,
-                                 outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
-                                 graph_out_path: &PathBuf) {
-
-        let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
-
-        writeln!(outlive_graph, "digraph G {{");
-
-        let mut regions_done = Vec::new();
-
-        for ((region1, region2), points) in outlives_at.iter() {
-            if regions_done.contains(&(((region2, region1), points), 0)) {
-                regions_done.remove_item(&(((region2, region1), points), 0));
-                regions_done.push((((region2, region1), points), 1))
-            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
-                regions_done.push((((region1, region2), points), 0));
-            }
-
-        }
-
-        let mut i = 0;
-
-        for (((region1, region2), points), eq) in regions_done.iter() {
-            let mut local_name1 = String::default();
-            let mut local_name2 = String::default();
-            let mut local_source1 = syntax_pos::DUMMY_SP;
-            let mut local_source2 = syntax_pos::DUMMY_SP;
-            let mut fm_ln1;
-            let mut fm_ln2;
-            let mut local_source1_line = usize::default();
-            let mut local_source2_line= usize::default();
-            let mut local_source1_snip = String::default();
-            let mut local_source2_snip= String::default();
-            let mut point_ln;
-            let mut point_snip = String::default();
-            //let mut anonym1_snip;
-
-            for (local_x, rv) in self.variable_regions.iter() {
-                if *region1 == rv {
-                    let local_decl = &self.mir.local_decls[*local_x];
-                    if local_decl.name != None {
-                        local_name1 = local_decl.name.unwrap().to_string();
-                        local_source1 = local_decl.source_info.span;
-                    } else {
-                        local_name1 = ("anonymous Variable").to_string();
-                        for block_data in self.mir.basic_blocks().iter(){
-                            for stmt in block_data.statements.iter(){
-                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                    match l.local() {
-                                        Some(v) => if v==*local_x{
-                                            local_source1 = stmt.source_info.span;
-                                        }
-
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
-                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
-                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
-                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
-                }
-                else if *region2 == rv {
-                    let local_decl = &self.mir.local_decls[*local_x];
-                    if local_decl.name != None {
-                        local_name2 = local_decl.name.unwrap().to_string();
-                        local_source2 = local_decl.source_info.span;
-                    } else {
-                        local_name2 = ("anonymous Variable").to_string();
-                        for block_data in self.mir.basic_blocks().iter(){
-                            for stmt in block_data.statements.iter(){
-                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
-                                    match l.local() {
-                                        Some(v) => if v==*local_x{
-                                            local_source2 = stmt.source_info.span;
-                                        }
-
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
+//    fn print_outlive_error_graph_legacy(&self,
+//                                 outlives_at: &FxHashMap<(Region, Region), Vec<PointIndex>>,
+//                                 graph_out_path: &PathBuf) {
+//
+//        let mut outlive_graph = File::create(graph_out_path).expect("Unable to create file");
+//
+//        writeln!(outlive_graph, "digraph G {{");
+//
+//        let mut regions_done = Vec::new();
+//
+//        for ((region1, region2), points) in outlives_at.iter() {
+//            if regions_done.contains(&(((region2, region1), points), 0)) {
+//                regions_done.remove_item(&(((region2, region1), points), 0));
+//                regions_done.push((((region2, region1), points), 1))
+//            }else if !regions_done.contains(&(((region2, region1), points), 0)) && !regions_done.contains(&(((region1, region2), points), 0)) {
+//                regions_done.push((((region1, region2), points), 0));
+//            }
+//
+//        }
+//
+//        let mut i = 0;
+//
+//        for (((region1, region2), points), eq) in regions_done.iter() {
+//            let mut local_name1 = String::default();
+//            let mut local_name2 = String::default();
+//            let mut local_source1 = syntax_pos::DUMMY_SP;
+//            let mut local_source2 = syntax_pos::DUMMY_SP;
+//            let mut fm_ln1;
+//            let mut fm_ln2;
+//            let mut local_source1_line = usize::default();
+//            let mut local_source2_line= usize::default();
+//            let mut local_source1_snip = String::default();
+//            let mut local_source2_snip= String::default();
+//            let mut point_ln;
+//            let mut point_snip = String::default();
+//            //let mut anonym1_snip;
+//
+//            for (local_x, rv) in self.variable_regions.iter() {
+//                if *region1 == rv {
+//                    let local_decl = &self.mir.local_decls[*local_x];
+//                    if local_decl.name != None {
+//                        local_name1 = local_decl.name.unwrap().to_string();
+//                        local_source1 = local_decl.source_info.span;
+//                    } else {
+//                        local_name1 = ("anonymous Variable").to_string();
+//                        for block_data in self.mir.basic_blocks().iter(){
+//                            for stmt in block_data.statements.iter(){
+//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+//                                    match l.local() {
+//                                        Some(v) => if v==*local_x{
+//                                            local_source1 = stmt.source_info.span;
+//                                        }
+//
+//                                        _ => {}
+//                                    }
+//                                }
+//                            }
+//                        }
+//                    }
+//
+//                    fm_ln1 = self.tcx.sess.source_map().lookup_line(local_source1.lo()).unwrap();
+//                    local_source1_snip = fm_ln1.sf.get_line(fm_ln1.line).unwrap().to_string();
+//                    //local_source1_snip = self.tcx.sess.codemap().get_source_file(file_name).unwrap().get_line(local_source1_line).unwrap();
+//                    //local_source1_snip = self.tcx.sess.codemap().span_to_snippet(local_source1).ok().unwrap();
+//                }
+//                else if *region2 == rv {
+//                    let local_decl = &self.mir.local_decls[*local_x];
+//                    if local_decl.name != None {
+//                        local_name2 = local_decl.name.unwrap().to_string();
+//                        local_source2 = local_decl.source_info.span;
 //                    } else {
 //                        local_name2 = ("anonymous Variable").to_string();
+//                        for block_data in self.mir.basic_blocks().iter(){
+//                            for stmt in block_data.statements.iter(){
+//                                if let mir::StatementKind::Assign(ref l, ref r) = stmt.kind{
+//                                    match l.local() {
+//                                        Some(v) => if v==*local_x{
+//                                            local_source2 = stmt.source_info.span;
+//                                        }
+//
+//                                        _ => {}
+//                                    }
+//                                }
+//                            }
+//                        }
 //                    }
-//                    local_source2 = local_decl.source_info.span;
-                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
-                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
-                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
-                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
-                }
-            }
-
-            let mut points_sort = points.clone();
-            //println!("points {:?}: {:?}", i, points_sort);
-            let mut ind = usize::max_value();
-            //let mut point_x = self.interner.get_point(points_sort[0]);
-            //println!("unsirted: {:?}",points_sort);
-            for point in points_sort.iter(){
-                let point1 = self.interner.get_point(*point);
-                let point_location = point1.location;
-                let point_block = &self.mir[point_location.block];
-                let point_span;
-                if point_block.statements.len() == point_location.statement_index{
-                    let terminator = point_block.terminator.as_ref().unwrap();
-                    point_span = terminator.source_info.span;
-                }else {
-                    let stmt_x = &point_block.statements[point_location.statement_index];
-                    point_span = stmt_x.source_info.span;
-                }
-                let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
-                if point_line < ind {
-                    ind = point_line;
-                    point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
-                    point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
-                }
-
-            }
-
-            if local_source1_snip != String::default(){
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-            }else {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
-            }
-            if local_source2_snip != String::default(){
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-            }else {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
-            }
-
-
-            if *eq==0 {
-
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-                writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
-            }
-
-            if *eq==1 {
-                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} and {:?}  may point to each other </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
-                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
-                writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
-            }
-
-            i += 1;
-        }
-
-
-        writeln!(outlive_graph, "}}");
-    }
+////                    } else {
+////                        local_name2 = ("anonymous Variable").to_string();
+////                    }
+////                    local_source2 = local_decl.source_info.span;
+//                    fm_ln2 = self.tcx.sess.source_map().lookup_line(local_source2.lo()).unwrap();
+//                    local_source2_snip = fm_ln2.sf.get_line(fm_ln2.line).unwrap().to_string();
+//                    //local_source2_line = self.tcx.sess.codemap().lookup_char_pos_adj(local_source2.lo()).line;
+//                    //local_source2_snip = self.tcx.sess.codemap().span_to_snippet(local_source2).ok().unwrap();
+//                }
+//            }
+//
+//            let mut points_sort = points.clone();
+//            //println!("points {:?}: {:?}", i, points_sort);
+//            let mut ind = usize::max_value();
+//            //let mut point_x = self.interner.get_point(points_sort[0]);
+//            //println!("unsirted: {:?}",points_sort);
+//            for point in points_sort.iter(){
+//                let point1 = self.interner.get_point(*point);
+//                let point_location = point1.location;
+//                let point_block = &self.mir[point_location.block];
+//                let point_span;
+//                if point_block.statements.len() == point_location.statement_index{
+//                    let terminator = point_block.terminator.as_ref().unwrap();
+//                    point_span = terminator.source_info.span;
+//                }else {
+//                    let stmt_x = &point_block.statements[point_location.statement_index];
+//                    point_span = stmt_x.source_info.span;
+//                }
+//                let point_line = self.tcx.sess.source_map().lookup_char_pos(point_span.lo()).line;
+//                if point_line < ind {
+//                    ind = point_line;
+//                    point_ln = self.tcx.sess.source_map().lookup_line(point_span.lo()).unwrap();
+//                    point_snip = point_ln.sf.get_line(ind-1).unwrap().to_string();
+//                }
+//
+//            }
+//
+//            if local_source1_snip != String::default(){
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region1, region1, local_name1, region1, local_source1_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+//            }else {
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region1, region1, local_name1, region1);
+//            }
+//            if local_source2_snip != String::default(){
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr><tr><td>{}</td></tr></table>> ]", region2, region2, local_name2, region2, local_source2_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+//            }else {
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, color=blue, label =  <<table><tr><td>Lifetime {:?}</td></tr><tr><td>{}: &amp;'{:?}</td></tr></table>> ]", region2, region2, local_name2, region2);
+//            }
+//
+//
+//            if *eq==0 {
+//
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Constraint </td></tr><tr><td> {:?} may point to {:?}</td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region2, region1, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+//                writeln!(outlive_graph, "{:?} -> {:?} -> {:?}\n", region1, i, region2);
+//            }
+//
+//            if *eq==1 {
+//                writeln!(outlive_graph, "{:?} [ shape=plaintext, label=  <<table><tr><td> Equal </td></tr><tr><td> {:?} and {:?}  may point to each other </td></tr><tr><td> generated at line {:?}: </td></tr><tr><td> {} </td></tr></table>>  ]", i, region1, region2, ind, point_snip.replace("&","&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+//                writeln!(outlive_graph, "{:?} -> {:?} -> {:?} [color= \"black:invis:black\", arrowhead=none]\n", region1, i, region2);
+//                writeln!(outlive_graph, "{{rank=same; {:?} {:?} {:?}}}\n", region1, region2, i);
+//            }
+//
+//            i += 1;
+//        }
+//
+//
+//        writeln!(outlive_graph, "}}");
+//    }
 
     /// This function will write a graph (in dot/Graphviz format) to a file. This graph either is
     /// intended to describe a lifetime error in a program or it is an outlives graph (of some
