@@ -27,7 +27,7 @@ Since no pre-built versions are available, one needs a working development envir
 In addition, Rust must be installed. Since a specific nightly version is required we strongly recommend using rustup. (Pleas stick to default settings regarding paths for storing the files of rustup.)
 
 Then, follow these steps to make everything ready for using Rust Life Assistant:
-- First you need to get a copy of the Rust Life executable. Currently, Rust Life Version 0.3.0 is required. Build it by following this steps:
+- First you need to get a copy of the Rust Life executable. Currently, Rust Life Version 0.3.1 is required. Build it by following this steps:
     - cd to the `compiler_mod` directory.
     - run the command `make build` to start the build process. This might take some time.
     - Note that by doing so rustup will also install the `nightly-2019-05-21` toolchain, which must be installed to use Rust Life (Assistant).

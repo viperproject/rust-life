@@ -2,7 +2,7 @@
 	"name": "rust-life-assistant",
 	"displayName": "rust-life-assistant",
 	"description": "VSCode integration to visualize lifetime errors in Rust programs",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"engines": {
 		"vscode": "^1.36.0"
 	},

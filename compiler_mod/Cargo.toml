@@ -1,6 +1,6 @@
 [package]
 name = "extract-error"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Dominik Dietler <ddietler@student.ethz.ch>"]
 
 [dependencies]
