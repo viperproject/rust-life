@@ -12,5 +12,8 @@ Reports:
 
 Copyright 2020, ETH Zurich
 
-* `collected_code` folder: released in public domain (where applicable).
-* `compiler_mod` and `rust-life-assistant` folders: released under the Mozilla Public License, v. 2.0.
+This project is released under the Mozilla Public License, v. 2.0 except for:
+
+* the file `compiler_mod/src/facts.rs`, which is an adaptation of https://github.com/rust-lang/polonius/blob/master/src/facts.rs and is thus released under the Apache License, v. 2.0
+
+* the files in the `collected_code` folder, each of which specify their origin and are thus released under their respective licenses
